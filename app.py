@@ -16,13 +16,14 @@ ALL_FUTURES_SYMBOLS = [
 
 def get_futures_symbols():
     try:
-        url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
+        # Spot API üzerinden coin listesini almak daha kararlıdır
+        url = "https://api.binance.com/api/v1/exchangeInfo"
         response = requests.get(url, timeout=3)
         if response.status_code == 200:
             data = response.json()
             symbols = []
             for s in data.get("symbols", []):
-                if s.get("contractType") == "PERPETUAL" and s.get("quoteAsset") == "USDT":
+                if s.get("quoteAsset") == "USDT" and s.get("status") == "TRADING":
                     symbols.append(s["symbol"])
             if symbols:
                 return sorted(symbols)
@@ -32,7 +33,8 @@ def get_futures_symbols():
 
 def get_current_price(symbol):
     try:
-        url = f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}"
+        # Fiyatı engelsiz Spot public API üzerinden çekiyoruz
+        url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
         response = requests.get(url, timeout=3)
         if response.status_code == 200:
             data = response.json()
@@ -41,9 +43,9 @@ def get_current_price(symbol):
                 return f"{price:,.2f}"
             else:
                 return f"{price:,.4f}"
-    except:
-        pass
-    return "N/A"
+    except Exception as e:
+        print(f"Fiyat çekme hatası: {e}")
+    return "0.00"
 
 def get_long_short_data(symbol):
     try:
