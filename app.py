@@ -3,19 +3,21 @@ import requests
 
 app = Flask(__name__)
 
-# Güvenli Vadeli Coin Listesi
-DEFAULT_SYMBOLS = [
+# En popüler ve aktif USDT vadeli coinlerinin tam listesi
+ALL_FUTURES_SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", 
     "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT", 
     "LINKUSDT", "UNIUSDT", "ATOMUSDT", "LTCUSDT", "NEARUSDT",
-    "APTUSDT", "SUIUSDT", "RENDERUSDT", "FETUSDT", "INJUSDT"
+    "APTUSDT", "SUIUSDT", "RENDERUSDT", "FETUSDT", "INJUSDT",
+    "ARBUSDT", "OPUSDT", "TIAUSDT", "PEPEUSDT", "SHIBUSDT",
+    "WIFUSDT", "FLOKIUSDT", "BCHUSDT", "ETCUSDT", "FILUSDT",
+    "ICPUSDT", "RUNEUSDT", "GRTUSDT", "FTMUSDT", "SEIUSDT"
 ]
 
-# Binance'den aktif tüm vadeli USDT çiftlerini çekme
 def get_futures_symbols():
     try:
         url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
-        response = requests.get(url, timeout=4)
+        response = requests.get(url, timeout=3)
         if response.status_code == 200:
             data = response.json()
             symbols = []
@@ -24,12 +26,10 @@ def get_futures_symbols():
                     symbols.append(s["symbol"])
             if symbols:
                 return sorted(symbols)
-    except Exception as e:
-        print(f"Sembol çekme hatası: {e}")
-    
-    return sorted(DEFAULT_SYMBOLS)
+    except:
+        pass
+    return sorted(ALL_FUTURES_SYMBOLS)
 
-# Seçilen coinin anlık fiyatını çekme
 def get_current_price(symbol):
     try:
         url = f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}"
@@ -43,16 +43,15 @@ def get_current_price(symbol):
                 return f"{price:,.4f}"
     except:
         pass
-    return "0.00"
+    return "N/A"
 
-# Binance Long/Short Oranlarını Çekme
 def get_long_short_data(symbol):
     try:
         url = f"https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol={symbol}&period=1h&limit=1"
         response = requests.get(url, timeout=3)
         if response.status_code == 200:
             data = response.json()
-            if data and isinstance(data, list):
+            if data and isinstance(data, list) and len(data) > 0:
                 latest = data[-1]
                 long_ratio = float(latest.get("longAccount", 0.5)) * 100
                 short_ratio = float(latest.get("shortAccount", 0.5)) * 100
