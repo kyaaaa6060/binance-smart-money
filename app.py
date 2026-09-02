@@ -14,8 +14,7 @@ def get_futures_symbols():
             if s.get("contractType") == "PERPETUAL" and s.get("quoteAsset") == "USDT":
                 symbols.append(s["symbol"])
         return sorted(symbols)
-    except Exception as e:
-        print(f"Semboller çekilemedi: {e}")
+    except:
         return ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
 
 # Seçilen coinin anlık fiyatını çekme
@@ -25,13 +24,33 @@ def get_current_price(symbol):
         response = requests.get(url, timeout=3)
         data = response.json()
         price = float(data.get("price", 0))
-        # Fiyata göre dinamik formatlama (örn: virgülden sonra 2 veya 4 basamak)
         if price >= 10:
             return f"{price:,.2f}"
         else:
             return f"{price:,.4f}"
     except:
         return "0.00"
+
+# Binance Long/Short Oranlarını Çekme (Açık Pozisyon İstatistikleri)
+def get_long_short_data(symbol):
+    try:
+        # Binance Top Trader Long/Short Ratio (Accounts) endpoint'i
+        url = f"https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol={symbol}&period=1h&limit=1"
+        response = requests.get(url, timeout=3)
+        data = response.json()
+        if data and isinstance(data, list):
+            latest = data[-1]
+            long_ratio = float(latest.get("longAccount", 0.5)) * 100
+            short_ratio = float(latest.get("shortAccount", 0.5)) * 100
+            ratio_val = float(latest.get("longShortRatio", 1.0))
+            return {
+                "long_pct": f"{long_ratio:.2f}%",
+                "short_pct": f"{short_ratio:.2f}%",
+                "ratio": f"{ratio_val:,.2f}"
+            }
+    except:
+        pass
+    return {"long_pct": "50.00%", "short_pct": "50.00%", "ratio": "1.00"}
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -87,7 +106,6 @@ HTML_TEMPLATE = """
             <span style="color: #0ecb81; font-size: 12px;">● Canlı</span>
         </div>
 
-        <!-- COİN SEÇİM MENÜSÜ -->
         <div class="selector-box">
             <form method="GET" action="/">
                 <select name="symbol" onchange="this.form.submit()">
@@ -106,7 +124,6 @@ HTML_TEMPLATE = """
             <div class="filter-btn">📊 Veritabanı</div>
         </div>
 
-        <!-- COİN ADI VE ANLIK FİYAT BÖLÜMÜ -->
         <div class="coin-header-box">
             <div class="coin-title">{{ selected_symbol }}</div>
             <div class="coin-price">Anlık: ${{ current_price }}</div>
@@ -115,27 +132,27 @@ HTML_TEMPLATE = """
         <!-- LONG KARTI -->
         <div class="card card-long">
             <div class="card-left">
-                <div class="title"><span class="dot-green"></span> <span class="text-green">LONG Ort. Giriş:</span></div>
-                <div class="sub">(1,842 işlem, $64.20M size)</div>
+                <div class="title"><span class="dot-green"></span> <span class="text-green">LONG Oranı:</span></div>
+                <div class="sub">Üst Hesap Dağılımı</div>
             </div>
-            <div class="card-right text-green">Veri Bekleniyor</div>
+            <div class="card-right text-green">{{ ls_data.long_pct }}</div>
         </div>
 
         <!-- SHORT KARTI -->
         <div class="card card-short">
             <div class="card-left">
-                <div class="title"><span class="dot-red"></span> <span class="text-red">SHORT Ort. Giriş:</span></div>
-                <div class="sub">(1,520 işlem, $51.90M size)</div>
+                <div class="title"><span class="dot-red"></span> <span class="text-red">SHORT Oranı:</span></div>
+                <div class="sub">Üst Hesap Dağılımı</div>
             </div>
-            <div class="card-right text-red">Veri Bekleniyor</div>
+            <div class="card-right text-red">{{ ls_data.short_pct }}</div>
         </div>
 
         <!-- ORTALAMA GİRİŞ KARTI -->
         <div class="card card-neutral">
             <div class="card-left">
-                <div class="title"><span class="dot-white"></span> <span class="text-white">Ortalama Giriş:</span></div>
+                <div class="title"><span class="dot-white"></span> <span class="text-white">Long/Short Çarpanı:</span></div>
             </div>
-            <div class="card-right text-white">Veri Bekleniyor</div>
+            <div class="card-right text-white">{{ ls_data.ratio }}</div>
         </div>
 
         <div class="refresh-info">Veriler her 5 dakikada bir otomatik güncellenir.</div>
@@ -153,12 +170,14 @@ def index():
         selected_symbol = "BTCUSDT"
         
     current_price = get_current_price(selected_symbol)
+    ls_data = get_long_short_data(selected_symbol)
         
     return render_template_string(
         HTML_TEMPLATE, 
         symbols=symbols, 
         selected_symbol=selected_symbol,
-        current_price=current_price
+        current_price=current_price,
+        ls_data=ls_data
     )
 
 if __name__ == "__main__":
