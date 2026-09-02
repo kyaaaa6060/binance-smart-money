@@ -1,9 +1,9 @@
 from flask import Flask, render_template_string, request
 import requests
 
-app = Flask(__name__.__contains__)
+app = Flask(__name__)
 
-# Güvenli ve Zengin Vadeli Coin Listesi (API kesilirse veya yavaşlarsa yedek olarak hemen devreye girer)
+# Güvenli Vadeli Coin Listesi
 DEFAULT_SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", 
     "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT", 
@@ -11,7 +11,7 @@ DEFAULT_SYMBOLS = [
     "APTUSDT", "SUIUSDT", "RENDERUSDT", "FETUSDT", "INJUSDT"
 ]
 
-# Binance'den aktif tüm vadeli USDT çiftlerini çekme (Hata korumalı)
+# Binance'den aktif tüm vadeli USDT çiftlerini çekme
 def get_futures_symbols():
     try:
         url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
@@ -27,7 +27,6 @@ def get_futures_symbols():
     except Exception as e:
         print(f"Sembol çekme hatası: {e}")
     
-    # Hata durumunda popüler listeyi döndür ki ekran boş kalmasın
     return sorted(DEFAULT_SYMBOLS)
 
 # Seçilen coinin anlık fiyatını çekme
@@ -176,8 +175,6 @@ HTML_TEMPLATE = """
 </body>
 </html>
 """
-
-app_run = app
 
 @app.route("/")
 def index():
