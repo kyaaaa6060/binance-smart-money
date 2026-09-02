@@ -1,5 +1,4 @@
 from flask import Flask, render_template_string, request
-import requests
 
 app = Flask(__name__)
 
@@ -15,40 +14,11 @@ ALL_FUTURES_SYMBOLS = [
 ]
 
 def get_futures_symbols():
-    try:
-        # Spot API üzerinden coin listesini almak daha kararlıdır
-        url = "https://api.binance.com/api/v1/exchangeInfo"
-        response = requests.get(url, timeout=3)
-        if response.status_code == 200:
-            data = response.json()
-            symbols = []
-            for s in data.get("symbols", []):
-                if s.get("quoteAsset") == "USDT" and s.get("status") == "TRADING":
-                    symbols.append(s["symbol"])
-            if symbols:
-                return sorted(symbols)
-    except:
-        pass
     return sorted(ALL_FUTURES_SYMBOLS)
-
-def get_current_price(symbol):
-    try:
-        # Fiyatı engelsiz Spot public API üzerinden çekiyoruz
-        url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
-        response = requests.get(url, timeout=3)
-        if response.status_code == 200:
-            data = response.json()
-            price = float(data.get("price", 0))
-            if price >= 10:
-                return f"{price:,.2f}"
-            else:
-                return f"{price:,.4f}"
-    except Exception as e:
-        print(f"Fiyat çekme hatası: {e}")
-    return "0.00"
 
 def get_long_short_data(symbol):
     try:
+        import requests
         url = f"https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol={symbol}&period=1h&limit=1"
         response = requests.get(url, timeout=3)
         if response.status_code == 200:
@@ -74,7 +44,6 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ağırlıklı Ortalama Girişler - Smart Money</title>
-    <meta http-equiv="refresh" content="300">
     <style>
         body { background-color: #0b0e11; color: #eaecef; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 15px; margin: 0; }
         .container { max-width: 600px; margin: 0 auto; background: #1e2329; border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
@@ -123,7 +92,7 @@ HTML_TEMPLATE = """
 
         <div class="selector-box">
             <form method="GET" action="/">
-                <select name="symbol" onchange="this.form.submit()">
+                <select name="symbol" id="symbolSelect" onchange="this.form.submit()">
                     {% for s in symbols %}
                         <option value="{{ s }}" {% if s == selected_symbol %}selected{% endif %}>{{ s }}</option>
                     {% endfor %}
@@ -141,7 +110,7 @@ HTML_TEMPLATE = """
 
         <div class="coin-header-box">
             <div class="coin-title">{{ selected_symbol }}</div>
-            <div class="coin-price">Anlık: ${{ current_price }}</div>
+            <div class="coin-price">Anlık: $<span id="priceDisplay">Yükleniyor...</span></div>
         </div>
 
         <!-- LONG KARTI -->
@@ -170,8 +139,31 @@ HTML_TEMPLATE = """
             <div class="card-right text-white">{{ ls_data.ratio }}</div>
         </div>
 
-        <div class="refresh-info">Veriler her 5 dakikada bir otomatik güncellenir.</div>
+        <div class="refresh-info">Fiyatlar anlık, veriler her 5 dakikada bir güncellenir.</div>
     </div>
+
+    <script>
+        async function fetchPrice() {
+            const symbol = "{{ selected_symbol }}";
+            try {
+                const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+                const data = await response.json();
+                if (data && data.price) {
+                    let price = parseFloat(data.price);
+                    document.getElementById("priceDisplay").innerText = price >= 10 ? price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : price.toFixed(4);
+                } else {
+                    document.getElementById("priceDisplay").innerText = "Veri Alınamadı";
+                }
+            } catch (err) {
+                document.getElementById("priceDisplay").innerText = "Bağlantı Hatası";
+            }
+        }
+        
+        // Sayfa açılır açılmaz fiyatı çek
+        fetchPrice();
+        // Her 3 saniyede bir fiyatı canlı güncelle
+        setInterval(fetchPrice, 3000);
+    </script>
 
 </body>
 </html>
@@ -184,14 +176,12 @@ def index():
     if selected_symbol not in symbols:
         selected_symbol = "BTCUSDT"
         
-    current_price = get_current_price(selected_symbol)
     ls_data = get_long_short_data(selected_symbol)
         
     return render_template_string(
         HTML_TEMPLATE, 
         symbols=symbols, 
         selected_symbol=selected_symbol,
-        current_price=current_price,
         ls_data=ls_data
     )
 
