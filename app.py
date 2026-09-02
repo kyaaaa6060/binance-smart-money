@@ -1,53 +1,68 @@
 from flask import Flask, render_template_string, request
 import requests
 
-app = Flask(__name__)
+app = Flask(__name__.__contains__)
 
-# Binance'den aktif tüm vadeli USDT çiftlerini çekme
+# Güvenli ve Zengin Vadeli Coin Listesi (API kesilirse veya yavaşlarsa yedek olarak hemen devreye girer)
+DEFAULT_SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", 
+    "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT", 
+    "LINKUSDT", "UNIUSDT", "ATOMUSDT", "LTCUSDT", "NEARUSDT",
+    "APTUSDT", "SUIUSDT", "RENDERUSDT", "FETUSDT", "INJUSDT"
+]
+
+# Binance'den aktif tüm vadeli USDT çiftlerini çekme (Hata korumalı)
 def get_futures_symbols():
     try:
         url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
-        response = requests.get(url, timeout=5)
-        data = response.json()
-        symbols = []
-        for s in data.get("symbols", []):
-            if s.get("contractType") == "PERPETUAL" and s.get("quoteAsset") == "USDT":
-                symbols.append(s["symbol"])
-        return sorted(symbols)
-    except:
-        return ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
+        response = requests.get(url, timeout=4)
+        if response.status_code == 200:
+            data = response.json()
+            symbols = []
+            for s in data.get("symbols", []):
+                if s.get("contractType") == "PERPETUAL" and s.get("quoteAsset") == "USDT":
+                    symbols.append(s["symbol"])
+            if symbols:
+                return sorted(symbols)
+    except Exception as e:
+        print(f"Sembol çekme hatası: {e}")
+    
+    # Hata durumunda popüler listeyi döndür ki ekran boş kalmasın
+    return sorted(DEFAULT_SYMBOLS)
 
 # Seçilen coinin anlık fiyatını çekme
 def get_current_price(symbol):
     try:
         url = f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}"
         response = requests.get(url, timeout=3)
-        data = response.json()
-        price = float(data.get("price", 0))
-        if price >= 10:
-            return f"{price:,.2f}"
-        else:
-            return f"{price:,.4f}"
+        if response.status_code == 200:
+            data = response.json()
+            price = float(data.get("price", 0))
+            if price >= 10:
+                return f"{price:,.2f}"
+            else:
+                return f"{price:,.4f}"
     except:
-        return "0.00"
+        pass
+    return "0.00"
 
-# Binance Long/Short Oranlarını Çekme (Açık Pozisyon İstatistikleri)
+# Binance Long/Short Oranlarını Çekme
 def get_long_short_data(symbol):
     try:
-        # Binance Top Trader Long/Short Ratio (Accounts) endpoint'i
         url = f"https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol={symbol}&period=1h&limit=1"
         response = requests.get(url, timeout=3)
-        data = response.json()
-        if data and isinstance(data, list):
-            latest = data[-1]
-            long_ratio = float(latest.get("longAccount", 0.5)) * 100
-            short_ratio = float(latest.get("shortAccount", 0.5)) * 100
-            ratio_val = float(latest.get("longShortRatio", 1.0))
-            return {
-                "long_pct": f"{long_ratio:.2f}%",
-                "short_pct": f"{short_ratio:.2f}%",
-                "ratio": f"{ratio_val:,.2f}"
-            }
+        if response.status_code == 200:
+            data = response.json()
+            if data and isinstance(data, list):
+                latest = data[-1]
+                long_ratio = float(latest.get("longAccount", 0.5)) * 100
+                short_ratio = float(latest.get("shortAccount", 0.5)) * 100
+                ratio_val = float(latest.get("longShortRatio", 1.0))
+                return {
+                    "long_pct": f"{long_ratio:.2f}%",
+                    "short_pct": f"{short_ratio:.2f}%",
+                    "ratio": f"{ratio_val:,.2f}"
+                }
     except:
         pass
     return {"long_pct": "50.00%", "short_pct": "50.00%", "ratio": "1.00"}
@@ -161,6 +176,8 @@ HTML_TEMPLATE = """
 </body>
 </html>
 """
+
+app_run = app
 
 @app.route("/")
 def index():
