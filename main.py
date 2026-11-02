@@ -20,11 +20,9 @@ CACHE = {
 }
 CACHE_DURATION = 5 
 
-# Tüm cihazların ortak göreceği aktif işlemler hafızası
 ACTIVE_TRADES = {}
 
 def get_binance_futures_tickers():
-    """Binance Futures üzerinden anlık Mark Fiyatları ve Fonlama Oranlarını çeker"""
     try:
         url = "https://fapi.binance.com/fapi/v1/premiumIndex"
         res = requests.get(url, timeout=2)
@@ -44,7 +42,6 @@ def get_binance_futures_tickers():
     return {}
 
 def fmt(val):
-    """Fiyatın büyüklüğüne göre dinamik basamak formatı"""
     if val < 0.0001:
         return f"{val:,.6f}"
     elif val < 1:
@@ -60,12 +57,11 @@ def fetch_karma_market_data():
     all_prices = []
     
     binance_data = get_binance_futures_tickers()
-    
     hl_url = "https://api.hyperliquid.xyz/info"
     payload = {"type": "metaAndAssetCtxs"}
     
     try:
-        res = requests.post(hl_url, json=payload, headers={"Content-Type": "application/json"}, timeout=2)
+        res = requests.post(hl_url, json=payload, headers={"Content-Type": "application/json"}, timeout=3)
         if res.status_code == 200:
             data = res.json()
             universe = data[0].get("universe", [])
@@ -114,7 +110,6 @@ def fetch_karma_market_data():
                         "general_avg": general_avg
                     }
 
-                # Sunucu tarafında ortak işlem yönetimi
                 if name not in ACTIVE_TRADES:
                     ACTIVE_TRADES[name] = {
                         "inTrade": True,
@@ -125,20 +120,9 @@ def fetch_karma_market_data():
                     }
                 
                 trade = ACTIVE_TRADES[name]
-                
-                hitTP = (trade["type"] == 'LONG' and mark_px >= trade["tp"]) or (trade["type"] == 'SHORT' and mark_px <= trade["tp"])
-                hitSL = (trade["type"] == 'LONG' and mark_px <= trade["sl"]) or (trade["type"] == 'SHORT' and mark_px >= trade["sl"])
-                
-                if hitTP or hitSL or not trade["inTrade"]:
-                    trade["inTrade"] = True
-                    trade["entry"] = mark_px
-                    trade["tp"] = mark_px * 1.028
-                    trade["sl"] = mark_px * 0.978
-                    trade["type"] = "LONG"
-
                 ai_report = {
                     "signal": "LONG İVME BASKISI",
-                    "comment": f"Normal eğrinin üzerinde +4.7x Hız ile tetiklenen yoğunluk tespit edildi. Giriş ${fmt(trade['entry'])} seviyesinden planlandı; hedef ${fmt(trade['tp'])}, stop ${fmt(trade['sl'])} seviyesindedir.",
+                    "comment": f"Normal eğrinin üzerinde tetiklenen yoğunluk tespit edildi. Giriş ${fmt(trade['entry'])} seviyesinden planlandı.",
                     "confluence": 88.4,
                     "entry": trade["entry"],
                     "tp": trade["tp"],
