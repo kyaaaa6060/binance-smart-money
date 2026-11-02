@@ -8,8 +8,8 @@ import streamlit as st
 # 1. BÖLÜM: KOPYA TİCARETİ TARAMA MOTORU
 # ==========================================
 
-MIN_LOSS = 6.0  # % zarar alt sınır
-MAX_LOSS = 20.0  # % zarar üst sınır
+MIN_LOSS = 6.0
+MAX_LOSS = 20.0
 USE_LEVERAGE = False
 HL_TOP_N = 100
 MIN_ACCOUNT_VALUE = 10_000
@@ -434,67 +434,196 @@ def run_scan():
 
 
 # ==========================================
-# 2. BÖLÜM: STREAMLIT WEB ARAYÜZÜ (DASHBOARD)
+# 2. BÖLÜM: GÖRSEL TARZI STREAMLIT ARAYÜZÜ
 # ==========================================
 
 st.set_page_config(
-    page_title='Smart Money Copy Trade Dashboard', layout='wide'
+    page_title='Ağırlıklı Ortalama Girişler - Smart Money', layout='centered'
 )
 
-st.title('📊 Kripto Smart Money & Tersteki Trader Dashboard')
+# Özel CSS ile görseldeki koyu tema ve kart tasarımını birebir uyguluyoruz
 st.markdown(
-    'Çoklu borsa (Hyperliquid, Binance, Bybit, OKX, Bitget, MEXC) canlı copy'
-    ' trade verileri ve **%6 - %20 zararda (terste)** olan pozisyonlar.'
+    """
+    <style>
+    .stApp {
+        background-color: #0e1117;
+        color: #ffffff;
+    }
+    .card-box {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        padding: 20px;
+        border-radius: 12px;
+        margin-bottom: 15px;
+    }
+    .long-card {
+        background-color: #11221c;
+        border-left: 5px solid #238636;
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+    }
+    .short-card {
+        background-color: #2c1518;
+        border-left: 5px solid #da3633;
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+    }
+    .neutral-card {
+        background-color: #21262d;
+        border-left: 5px solid #8b949e;
+        padding: 15px;
+        border-radius: 8px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
-col1, col2 = st.columns([1, 4])
+st.markdown('### 📊 Ağırlıklı Ortalama Girişler')
+st.markdown('---')
 
-with col1:
-  if st.button('🔄 Borsaları Şimdi Tara'):
-    with st.spinner('Tüm borsalar taranıyor... (1-2 dk sürebilir)'):
-      success = run_scan()
-      if success:
-        st.success('Tarama başarılı!')
+# Tarama Butonu ve Durum
+col_btn1, col_btn2 = st.columns([3, 1])
+with col_btn1:
+  if st.button('🔄 Borsaları Güncelle ve Verileri Çek'):
+    with st.spinner('Tüm borsalar taranıyor...'):
+      if run_scan():
+        st.success('Güncellendi!')
         st.rerun()
       else:
-        st.error('Veri çekilemedi.')
+        st.error('Veri alınamadı.')
 
 rapor_yolu = 'copytrade_rapor.xlsx'
 
 if os.path.exists(rapor_yolu):
   try:
-    df_terste = pd.read_excel(rapor_yolu, sheet_name='Terste_%6-20')
     df_tum = pd.read_excel(rapor_yolu, sheet_name='Tum_Pozisyonlar')
+    df_terste = pd.read_excel(rapor_yolu, sheet_name='Terste_%6-20')
 
     coins = (
-        ['TÜMÜ'] + sorted(list(df_tum['coin'].unique()))
+        sorted(list(df_tum['coin'].unique()))
         if 'coin' in df_tum.columns and not df_tum.empty
         else []
     )
-    selected_coin = st.selectbox('🔍 Coin Seçin:', coins)
 
-    if selected_coin != 'TÜMÜ':
-      if not df_terste.empty and 'coin' in df_terste.columns:
-        df_terste = df_terste[df_terste['coin'] == selected_coin]
-      if not df_tum.empty and 'coin' in df_tum.columns:
-        df_tum = df_tum[df_tum['coin'] == selected_coin]
+    if coins:
+      # Veri Kaynağı Simülasyon Sekmeleri (Görseldeki gibi)
+      st.markdown('**Veri Kaynağı Seçin:**')
+      source_tab = st.radio(
+          'Kaynak',
+          [
+              'Sadece Copy Liderler',
+              'Sadece Balinalar',
+              'Tümü',
+              'Veritabanı',
+          ],
+          horizontal=True,
+          label_visibility='collapsed',
+      )
 
-    st.divider()
-    st.subheader('⚠️ %6 - %20 Zararda (Terste) Kalan Master Traderlar')
-    if not df_terste.empty:
-      st.dataframe(df_terste, use_container_width=True)
+      selected_coin = st.selectbox('🔍 Coin Seçin:', coins)
+      st.markdown('---')
+
+      # Seçilen coin için verileri filtrele
+      coin_data = df_tum[
+          (df_tum['coin'] == selected_coin) & (df_tum['exchange'] == 'ALL')
+      ]
+
+      long_row = coin_data[coin_data['side'] == 'LONG']
+      short_row = coin_data[coin_data['side'] == 'SHORT']
+
+      long_price = (
+          long_row['ort_giris'].values[0] if not long_row.empty else 0
+      )
+      long_count = (
+          int(long_row['trader_sayisi'].values[0]) if not long_row.empty else 0
+      )
+      long_aum = (
+          long_row['pozisyon_buyuklugu_AUM'].values[0]
+          if not long_row.empty
+          else 0
+      )
+
+      short_price = (
+          short_row['ort_giris'].values[0] if not short_row.empty else 0
+      )
+      short_count = (
+          int(short_row['trader_sayisi'].values[0])
+          if not short_row.empty
+          else 0
+      )
+      short_aum = (
+          short_row['pozisyon_buyuklugu_AUM'].values[0]
+          if not short_row.empty
+          else 0
+      )
+
+      genel_ort = (
+          (long_price + short_price) / 2 if long_price and short_price else 0
+      )
+
+      st.markdown(
+          f"<h2 style='text-align: center; color: #f0f6fc;'>{selected_coin}USDT</h2>",
+          unsafe_allow_html=True,
+      )
+
+      # Görseldeki Long Kartı
+      st.markdown(
+          f"""
+            <div class="long-card">
+                <span style="color: #238636; font-weight: bold; font-size: 16px;">🟢 LONG Ort. Giriş:</span>
+                <span style="float: right; color: #3fb950; font-weight: bold; font-size: 20px;">${long_price:,.2f}</span><br>
+                <small style="color: #8b949e;">({long_count} işlem, ${long_aum:,.2f} size)</small>
+            </div>
+            """,
+          unsafe_allow_html=True,
+      )
+
+      # Görseldeki Short Kartı
+      st.markdown(
+          f"""
+            <div class="short-card">
+                <span style="color: #da3633; font-weight: bold; font-size: 16px;">🔴 SHORT Ort. Giriş:</span>
+                <span style="float: right; color: #f85149; font-weight: bold; font-size: 20px;">${short_price:,.2f}</span><br>
+                <small style="color: #8b949e;">({short_count} işlem, ${short_aum:,.2f} size)</small>
+            </div>
+            """,
+          unsafe_allow_html=True,
+      )
+
+      # Görseldeki Ortalama Giriş Kartı
+      st.markdown(
+          f"""
+            <div class="neutral-card">
+                <span style="color: #c9d1d9; font-weight: bold; font-size: 16px;">⚪ Ortalama Giriş:</span>
+                <span style="float: right; color: #e3b341; font-weight: bold; font-size: 20px;">${genel_ort:,.2f}</span>
+            </div>
+            """,
+          unsafe_allow_html=True,
+      )
+
+      st.markdown('---')
+      with st.expander(
+          '⚠️ %6 - %20 Zararda (Terste) Kalan Detaylı Liste', expanded=False
+      ):
+        if not df_terste.empty and 'coin' in df_terste.columns:
+          coin_terste = df_terste[df_terste['coin'] == selected_coin]
+          if not coin_terste.empty:
+            st.dataframe(coin_terste, use_container_width=True)
+          else:
+            st.info('Bu coinde bu aralıkta terste kalan trader yok.')
+        else:
+          st.info('Veri bulunamadı.')
+
     else:
-      st.info('Seçilen kritere uyan tersteki pozisyon bulunamadı.')
-
-    st.divider()
-    st.subheader('📈 Harmanlanmış Tüm Pozisyon Özeti (AUM & Giriş Ort.)')
-    if not df_tum.empty:
-      st.dataframe(df_tum, use_container_width=True)
+      st.warning('Tabloda coin verisi bulunamadı.')
 
   except Exception as e:
-    st.error(f'Rapor okunurken hata oluştu: {e}')
+    st.error(f'Görselleştirme hatası: {e}')
 else:
-  st.warning(
-      'Henüz rapor verisi yok. Lütfen yukarıdaki **"Borsaları Şimdi Tara"**'
-      ' butonuna basın.'
+  st.info(
+      'Henüz veri taranmadı. Lütfen yukarıdaki **"Borsaları Güncelle ve Verileri'
+      ' Çek"** butonuna basın.'
   )
