@@ -5,15 +5,15 @@ import requests
 import streamlit as st
 
 # ==========================================
-# 1. BÖLÜM: KOPYA TİCARETİ TARAMA MOTORU
+# 1. BÖLÜM: KOPYA TİCARETİ TARAMA MOTORU (YÜKSEK HACİM)
 # ==========================================
 
 MIN_LOSS = 6.0
 MAX_LOSS = 20.0
 USE_LEVERAGE = False
-HL_TOP_N = 100
-MIN_ACCOUNT_VALUE = 10_000
-SLEEP = 0.2
+HL_TOP_N = 300         # Hyperliquid taranacak lider sayısı artırıldı
+MIN_ACCOUNT_VALUE = 5_000 # Minimum hesap değeri bütçesi genişletildi
+SLEEP = 0.15           # İstekler arası bekleme hızı optimize edildi
 ENABLED = ["hyperliquid", "binance", "bybit", "okx", "bitget", "mexc"]
 
 S = requests.Session()
@@ -49,7 +49,7 @@ def fetch_hyperliquid():
   out = []
   try:
     lb = S.get(
-        "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard", timeout=20
+        "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard", timeout=25
     ).json()
     rows = lb.get("leaderboardRows", [])
     rows = [
@@ -103,7 +103,7 @@ def hyperliquid_prices():
     return {}
 
 
-def fetch_binance(top_n=30):
+def fetch_binance(top_n=80):  # Limit artırıldı
   out = []
   base = "https://www.binance.com/bapi/futures"
   body = {
@@ -120,19 +120,26 @@ def fetch_binance(top_n=30):
       "useAiRecommended": False,
   }
   leaders = []
-  try:
-    r = S.post(
-        f"{base}/v1/friendly/future/copy-trade/home-page/query-list",
-        json=body,
-        timeout=15,
-    ).json()
-    items = (r.get("data") or {}).get("list") or []
-    for i in items[:top_n]:
-      leaders.append(i["leadPortfolioId"])
-  except Exception:
-    pass
+  page = 1
+  while len(leaders) < top_n and page <= 5:
+    body["pageNumber"] = page
+    try:
+      r = S.post(
+          f"{base}/v1/friendly/future/copy-trade/home-page/query-list",
+          json=body,
+          timeout=15,
+      ).json()
+      items = (r.get("data") or {}).get("list") or []
+      if not items:
+        break
+      for i in items:
+        leaders.append(i["leadPortfolioId"])
+      page += 1
+    except Exception:
+      break
+    time.sleep(SLEEP)
 
-  for pid in leaders:
+  for pid in leaders[:top_n]:
     try:
       r = S.get(
           f"{base}/v1/friendly/future/copy-trade/lead-data/positions",
@@ -167,7 +174,7 @@ def fetch_binance(top_n=30):
   return out
 
 
-def fetch_bybit(top_n=20):
+def fetch_bybit(top_n=50):  # Limit artırıldı
   out = []
   try:
     r = S.get(
@@ -208,7 +215,7 @@ def fetch_bybit(top_n=20):
   return out
 
 
-def fetch_okx(top_n=20):
+def fetch_okx(top_n=50):  # Limit artırıldı
   out = []
   try:
     r = S.get(
@@ -249,7 +256,7 @@ def fetch_okx(top_n=20):
   return out
 
 
-def fetch_bitget(top_n=20):
+def fetch_bitget(top_n=50):  # Limit artırıldı
   out = []
   try:
     r = S.get(
@@ -290,7 +297,7 @@ def fetch_bitget(top_n=20):
   return out
 
 
-def fetch_mexc(top_n=20):
+def fetch_mexc(top_n=50):  # Limit artırıldı
   out = []
   try:
     r = S.get(
@@ -434,7 +441,7 @@ def run_scan():
 
 
 # ==========================================
-# 2. BÖLÜM: GELİŞMİŞ GÖRSEL ARAYÜZ (GÖNDERDİĞİNİZ ÖRNEK)
+# 2. BÖLÜM: ARAYÜZ (DASHBOARD)
 # ==========================================
 
 st.set_page_config(
@@ -473,13 +480,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Üst Güncelleme Butonu
 col_b1, col_b2 = st.columns([3, 1])
 with col_b1:
-  if st.button("🔄 Borsaları Güncelle"):
-    with st.spinner("Veriler taranıyor..."):
+  if st.button("🔄 Borsaları Güncelle (Yüksek Hacim)"):
+    with st.spinner("Tüm borsalar derinlemesine taranıyor (1-2 dk sürebilir)..."):
       if run_scan():
-        st.success("Başarılı!")
+        st.success("Güncellendi!")
         st.rerun()
       else:
         st.error("Veri alınamadı.")
@@ -491,7 +497,6 @@ if os.path.exists(rapor_yolu):
     df_tum = pd.read_excel(rapor_yolu, sheet_name="Tum_Pozisyonlar")
     df_terste = pd.read_excel(rapor_yolu, sheet_name=f"Terste_%{int(MIN_LOSS)}-{int(MAX_LOSS)}")
 
-    # Görseldeki Üst Kategori Butonları (Radio grubu)
     st.markdown("<p style='text-align: center; color: #8b949e; font-size: 14px;'>Veri Kaynağı Seçin:</p>", unsafe_allow_html=True)
     
     source_mode = st.radio(
@@ -510,10 +515,9 @@ if os.path.exists(rapor_yolu):
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Cache Bilgisi ve Güncel / Geçmiş Sekmeleri
     c_col1, c_col2 = st.columns(spec=[2, 3])
     with c_col1:
-      st.markdown("<small style='color: #8b949e;'>⚡ Cache yenilenme: 4:52</small>", unsafe_allow_html=True)
+      st.markdown("<small style='color: #8b949e;'>⚡ Canlı Veri Akışı</small>", unsafe_allow_html=True)
     with c_col2:
       tab_secim = st.radio("Zaman", ["📈 Güncel", "🕒 Geçmiş"], horizontal=True, label_visibility="collapsed")
 
@@ -525,9 +529,7 @@ if os.path.exists(rapor_yolu):
       selected_coin = st.selectbox("🔍 Coin Seçin:", coins)
       st.markdown(f"<h3 style='text-align: center; color: #f0f6fc; margin-top: 10px;'>{selected_coin}USDT</h3>", unsafe_allow_html=True)
 
-      # Mod ve filtrelere göre veri seçimi
       active_df = df_terste if "Terste" in source_mode else df_tum
-
       coin_data = active_df[(active_df["coin"] == selected_coin) & (active_df["exchange"] == "ALL")]
 
       long_row = coin_data[coin_data["side"] == "LONG"]
@@ -543,7 +545,6 @@ if os.path.exists(rapor_yolu):
 
       genel_ort = (long_price + short_price) / 2 if (long_price > 0 and short_price > 0) else (long_price or short_price)
 
-      # LONG Kartı
       st.markdown(
           f"""
             <div class="long-card">
@@ -555,7 +556,6 @@ if os.path.exists(rapor_yolu):
           unsafe_allow_html=True,
       )
 
-      # SHORT Kartı
       st.markdown(
           f"""
             <div class="short-card">
@@ -567,7 +567,6 @@ if os.path.exists(rapor_yolu):
           unsafe_allow_html=True,
       )
 
-      # Ortalama Giriş Kartı
       st.markdown(
           f"""
             <div class="neutral-card">
