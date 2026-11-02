@@ -14,31 +14,31 @@ USE_LEVERAGE = False
 HL_TOP_N = 100
 MIN_ACCOUNT_VALUE = 10_000
 SLEEP = 0.2
-ENABLED = ['hyperliquid', 'binance', 'bybit', 'okx', 'bitget', 'mexc']
+ENABLED = ["hyperliquid", "binance", "bybit", "okx", "bitget", "mexc"]
 
 S = requests.Session()
 S.headers.update({
-    'User-Agent': (
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,'
-        ' like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
+        " like Gecko) Chrome/120.0.0.0 Safari/537.36"
     ),
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
 })
 
 
 def norm_coin(sym: str) -> str:
   if not sym:
-    return ''
+    return ""
   s = (
       sym.upper()
-      .replace('-SWAP', '')
-      .replace('_', '')
-      .replace('-', '')
-      .replace('/', '')
+      .replace("-SWAP", "")
+      .replace("_", "")
+      .replace("-", "")
+      .replace("/", "")
   )
-  if s.startswith('XBT'):
-    s = 'BTC' + s[3:]
-  for q in ('USDT', 'USDC', 'USD', 'PERP', 'COIN'):
+  if s.startswith("XBT"):
+    s = "BTC" + s[3:]
+  for q in ("USDT", "USDC", "USD", "PERP", "COIN"):
     if s.endswith(q):
       s = s[:-len(q)]
       break
@@ -49,55 +49,55 @@ def fetch_hyperliquid():
   out = []
   try:
     lb = S.get(
-        'https://stats-data.hyperliquid.xyz/Mainnet/leaderboard', timeout=20
+        "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard", timeout=20
     ).json()
-    rows = lb.get('leaderboardRows', [])
+    rows = lb.get("leaderboardRows", [])
     rows = [
-        r for r in rows if float(r.get('accountValue', 0)) >= MIN_ACCOUNT_VALUE
+        r for r in rows if float(r.get("accountValue", 0)) >= MIN_ACCOUNT_VALUE
     ]
-    rows.sort(key=lambda r: float(r['accountValue']), reverse=True)
+    rows.sort(key=lambda r: float(r["accountValue"]), reverse=True)
     for r in rows[:HL_TOP_N]:
-      addr = r['ethAddress']
+      addr = r["ethAddress"]
       try:
         st_data = S.post(
-            'https://api.hyperliquid.xyz/info',
-            json={'type': 'clearinghouseState', 'user': addr},
+            "https://api.hyperliquid.xyz/info",
+            json={"type": "clearinghouseState", "user": addr},
             timeout=10,
         ).json()
       except Exception:
         continue
-      for ap in st_data.get('assetPositions', []):
-        p = ap['position']
-        szi = float(p['szi'])
+      for ap in st_data.get("assetPositions", []):
+        p = ap["position"]
+        szi = float(p["szi"])
         if szi == 0:
           continue
         out.append(
             dict(
-                exchange='hyperliquid',
+                exchange="hyperliquid",
                 trader=addr,
-                coin=norm_coin(p['coin']),
-                side='LONG' if szi > 0 else 'SHORT',
-                entry=float(p['entryPx']),
-                notional=abs(float(p['positionValue'])),
-                leverage=float(p.get('leverage', {}).get('value', 1)),
+                coin=norm_coin(p["coin"]),
+                side="LONG" if szi > 0 else "SHORT",
+                entry=float(p["entryPx"]),
+                notional=abs(float(p["positionValue"])),
+                leverage=float(p.get("leverage", {}).get("value", 1)),
                 mark=None,
             )
         )
       time.sleep(SLEEP)
   except Exception as e:
-    print(f'Hyperliquid Hata: {e}')
+    print(f"Hyperliquid Hata: {e}")
   return out
 
 
 def hyperliquid_prices():
   try:
     mids = S.post(
-        'https://api.hyperliquid.xyz/info',
-        json={'type': 'allMids'},
+        "https://api.hyperliquid.xyz/info",
+        json={"type": "allMids"},
         timeout=10,
     ).json()
     return {
-        norm_coin(k): float(v) for k, v in mids.items() if not k.startswith('@')
+        norm_coin(k): float(v) for k, v in mids.items() if not k.startswith("@")
     }
   except Exception:
     return {}
@@ -105,60 +105,60 @@ def hyperliquid_prices():
 
 def fetch_binance(top_n=30):
   out = []
-  base = 'https://www.binance.com/bapi/futures'
+  base = "https://www.binance.com/bapi/futures"
   body = {
-      'pageNumber': 1,
-      'pageSize': 20,
-      'timeRange': '30D',
-      'dataType': 'ROI',
-      'favoriteOnly': False,
-      'hideFull': False,
-      'nickname': '',
-      'order': 'DESC',
-      'userAsset': 0,
-      'portfolioType': 'ALL',
-      'useAiRecommended': False,
+      "pageNumber": 1,
+      "pageSize": 20,
+      "timeRange": "30D",
+      "dataType": "ROI",
+      "favoriteOnly": False,
+      "hideFull": False,
+      "nickname": "",
+      "order": "DESC",
+      "userAsset": 0,
+      "portfolioType": "ALL",
+      "useAiRecommended": False,
   }
   leaders = []
   try:
     r = S.post(
-        f'{base}/v1/friendly/future/copy-trade/home-page/query-list',
+        f"{base}/v1/friendly/future/copy-trade/home-page/query-list",
         json=body,
         timeout=15,
     ).json()
-    items = (r.get('data') or {}).get('list') or []
+    items = (r.get("data") or {}).get("list") or []
     for i in items[:top_n]:
-      leaders.append(i['leadPortfolioId'])
+      leaders.append(i["leadPortfolioId"])
   except Exception:
     pass
 
   for pid in leaders:
     try:
       r = S.get(
-          f'{base}/v1/friendly/future/copy-trade/lead-data/positions',
-          params={'portfolioId': pid},
+          f"{base}/v1/friendly/future/copy-trade/lead-data/positions",
+          params={"portfolioId": pid},
           timeout=10,
       ).json()
-      for p in r.get('data') or []:
-        amt = float(p.get('positionAmount', 0))
+      for p in r.get("data") or []:
+        amt = float(p.get("positionAmount", 0))
         if amt == 0:
           continue
-        entry = float(p['entryPrice'])
+        entry = float(p["entryPrice"])
         out.append(
             dict(
-                exchange='binance',
+                exchange="binance",
                 trader=str(pid),
-                coin=norm_coin(p['symbol']),
+                coin=norm_coin(p["symbol"]),
                 side=(
-                    'LONG'
-                    if p.get('positionSide', '').upper() == 'LONG'
-                    or (p.get('positionSide', 'BOTH') == 'BOTH' and amt > 0)
-                    else 'SHORT'
+                    "LONG"
+                    if p.get("positionSide", "").upper() == "LONG"
+                    or (p.get("positionSide", "BOTH") == "BOTH" and amt > 0)
+                    else "SHORT"
                 ),
                 entry=entry,
-                notional=abs(amt) * float(p.get('markPrice', entry)),
-                leverage=float(p.get('leverage', 1)),
-                mark=float(p['markPrice']) if p.get('markPrice') else None,
+                notional=abs(amt) * float(p.get("markPrice", entry)),
+                leverage=float(p.get("leverage", 1)),
+                mark=float(p["markPrice"]) if p.get("markPrice") else None,
             )
         )
     except Exception:
@@ -171,34 +171,34 @@ def fetch_bybit(top_n=20):
   out = []
   try:
     r = S.get(
-        'https://gw.bybit.com/perpetual/copy-trade/v1/public/leaderboard/query-rsp-list',
-        params={'limit': top_n, 'sortBy': 'roi'},
+        "https://gw.bybit.com/perpetual/copy-trade/v1/public/leaderboard/query-rsp-list",
+        params={"limit": top_n, "sortBy": "roi"},
         timeout=15,
     ).json()
-    items = (r.get('result') or {}).get('list') or []
+    items = (r.get("result") or {}).get("list") or []
     for item in items:
-      enc_uid = item.get('encryptedUid')
+      enc_uid = item.get("encryptedUid")
       if not enc_uid:
         continue
       pos_r = S.get(
-          'https://gw.bybit.com/perpetual/copy-trade/v1/public/leaderboard/positions',
-          params={'encryptedUid': enc_uid},
+          "https://gw.bybit.com/perpetual/copy-trade/v1/public/leaderboard/positions",
+          params={"encryptedUid": enc_uid},
           timeout=10,
       ).json()
-      for p in (pos_r.get('result') or {}).get('positionList') or []:
-        size = float(p.get('size', 0))
+      for p in (pos_r.get("result") or {}).get("positionList") or []:
+        size = float(p.get("size", 0))
         if size == 0:
           continue
-        entry = float(p.get('entryPrice', 0))
+        entry = float(p.get("entryPrice", 0))
         out.append(
             dict(
-                exchange='bybit',
+                exchange="bybit",
                 trader=str(enc_uid),
-                coin=norm_coin(p.get('symbol', '')),
-                side='LONG' if p.get('side', '').upper() == 'BUY' else 'SHORT',
+                coin=norm_coin(p.get("symbol", "")),
+                side="LONG" if p.get("side", "").upper() == "BUY" else "SHORT",
                 entry=entry,
                 notional=abs(size) * entry,
-                leverage=float(p.get('leverage', 1)),
+                leverage=float(p.get("leverage", 1)),
                 mark=None,
             )
         )
@@ -212,34 +212,34 @@ def fetch_okx(top_n=20):
   out = []
   try:
     r = S.get(
-        'https://www.okx.com/v3/c2c/copytrading/public-lead-traders',
-        params={'limit': top_n, 'period': '30d'},
+        "https://www.okx.com/v3/c2c/copytrading/public-lead-traders",
+        params={"limit": top_n, "period": "30d"},
         timeout=15,
     ).json()
-    items = (r.get('data') or {}).get('list') or []
+    items = (r.get("data") or {}).get("list") or []
     for item in items:
-      inst_id = item.get('uniqueCode')
+      inst_id = item.get("uniqueCode")
       if not inst_id:
         continue
       pos_r = S.get(
-          'https://www.okx.com/v3/c2c/copytrading/public-lead-positions',
-          params={'uniqueCode': inst_id},
+          "https://www.okx.com/v3/c2c/copytrading/public-lead-positions",
+          params={"uniqueCode": inst_id},
           timeout=10,
       ).json()
-      for p in pos_r.get('data') or []:
-        sz = float(p.get('pos', 0))
+      for p in pos_r.get("data") or []:
+        sz = float(p.get("pos", 0))
         if sz == 0:
           continue
-        entry = float(p.get('avgPx', 0))
+        entry = float(p.get("avgPx", 0))
         out.append(
             dict(
-                exchange='okx',
+                exchange="okx",
                 trader=str(inst_id),
-                coin=norm_coin(p.get('instId', '')),
-                side='LONG' if sz > 0 else 'SHORT',
+                coin=norm_coin(p.get("instId", "")),
+                side="LONG" if sz > 0 else "SHORT",
                 entry=entry,
                 notional=abs(sz) * entry,
-                leverage=float(p.get('lever', 1)),
+                leverage=float(p.get("lever", 1)),
                 mark=None,
             )
         )
@@ -253,34 +253,34 @@ def fetch_bitget(top_n=20):
   out = []
   try:
     r = S.get(
-        'https://api.bitget.com/api/v2/mix/copy/trader/query-expert-list',
-        params={'pageSize': top_n, 'pageNo': 1},
+        "https://api.bitget.com/api/v2/mix/copy/trader/query-expert-list",
+        params={"pageSize": top_n, "pageNo": 1},
         timeout=15,
     ).json()
-    items = (r.get('data') or {}).get('resultList') or []
+    items = (r.get("data") or {}).get("resultList") or []
     for item in items:
-      tracer_id = item.get('tracerNo') or item.get('userId')
+      tracer_id = item.get("tracerNo") or item.get("userId")
       if not tracer_id:
         continue
       pos_r = S.get(
-          'https://api.bitget.com/api/v2/mix/copy/trader/query-current-orders',
-          params={'tracerNo': tracer_id},
+          "https://api.bitget.com/api/v2/mix/copy/trader/query-current-orders",
+          params={"tracerNo": tracer_id},
           timeout=10,
       ).json()
-      for p in pos_r.get('data') or []:
-        hold_amount = float(p.get('holdAmount', 0))
+      for p in pos_r.get("data") or []:
+        hold_amount = float(p.get("holdAmount", 0))
         if hold_amount == 0:
           continue
-        entry = float(p.get('openPriceAvg', 0))
+        entry = float(p.get("openPriceAvg", 0))
         out.append(
             dict(
-                exchange='bitget',
+                exchange="bitget",
                 trader=str(tracer_id),
-                coin=norm_coin(p.get('symbol', '')),
-                side='LONG' if p.get('holdSide', '').upper() == 'LONG' else 'SHORT',
+                coin=norm_coin(p.get("symbol", "")),
+                side="LONG" if p.get("holdSide", "").upper() == "LONG" else "SHORT",
                 entry=entry,
                 notional=abs(hold_amount) * entry,
-                leverage=float(p.get('leverage', 1)),
+                leverage=float(p.get("leverage", 1)),
                 mark=None,
             )
         )
@@ -294,34 +294,34 @@ def fetch_mexc(top_n=20):
   out = []
   try:
     r = S.get(
-        'https://contract.mexc.com/api/v1/copy/mixed/client/list/rank',
-        params={'pageSize': top_n, 'rankType': 1},
+        "https://contract.mexc.com/api/v1/copy/mixed/client/list/rank",
+        params={"pageSize": top_n, "rankType": 1},
         timeout=15,
     ).json()
-    items = (r.get('data') or {}).get('result') or []
+    items = (r.get("data") or {}).get("result") or []
     for item in items:
-      uid = item.get('copyUid') or item.get('uid')
+      uid = item.get("copyUid") or item.get("uid")
       if not uid:
         continue
       pos_r = S.get(
-          'https://contract.mexc.com/api/v1/copy/mixed/position/open/list',
-          params={'copyUid': uid},
+          "https://contract.mexc.com/api/v1/copy/mixed/position/open/list",
+          params={"copyUid": uid},
           timeout=10,
       ).json()
-      for p in pos_r.get('data') or []:
-        vol = float(p.get('vol', 0))
+      for p in pos_r.get("data") or []:
+        vol = float(p.get("vol", 0))
         if vol == 0:
           continue
-        entry = float(p.get('openPrice', 0))
+        entry = float(p.get("openPrice", 0))
         out.append(
             dict(
-                exchange='mexc',
+                exchange="mexc",
                 trader=str(uid),
-                coin=norm_coin(p.get('symbol', '')),
-                side='LONG' if p.get('positionType', 1) == 1 else 'SHORT',
+                coin=norm_coin(p.get("symbol", "")),
+                side="LONG" if p.get("positionType", 1) == 1 else "SHORT",
                 entry=entry,
                 notional=abs(vol) * entry,
-                leverage=float(p.get('leverage', 1)),
+                leverage=float(p.get("leverage", 1)),
                 mark=None,
             )
         )
@@ -345,7 +345,7 @@ def wavg(df):
   return (
       (df.entry * df.notional).sum() / df.notional.sum()
       if df.notional.sum()
-      else float('nan')
+      else float("nan")
   )
 
 
@@ -355,9 +355,9 @@ def summarize(df, label_cols):
     keys = keys if isinstance(keys, tuple) else (keys,)
     rows.append({
         **dict(zip(label_cols, keys)),
-        'trader_sayisi': g.trader.nunique(),
-        'pozisyon_buyuklugu_AUM': round(g.notional.sum(), 2),
-        'ort_giris': wavg(g),
+        "trader_sayisi": g.trader.nunique(),
+        "pozisyon_buyuklugu_AUM": round(g.notional.sum(), 2),
+        "ort_giris": wavg(g),
     })
   return pd.DataFrame(rows)
 
@@ -371,7 +371,7 @@ def run_scan():
       data = ADAPTERS[name]()
       positions += data
     except Exception as e:
-      print(f'{name} Hatası: {e}')
+      print(f"{name} Hatası: {e}")
 
   if not positions:
     return False
@@ -379,12 +379,12 @@ def run_scan():
   df = pd.DataFrame(positions)
   prices = hyperliquid_prices()
 
-  df['price'] = df.apply(
+  df["price"] = df.apply(
       lambda r: r.mark if (r.mark and r.mark > 0) else prices.get(r.coin),
       axis=1,
   )
-  df['price'] = df['price'].fillna(df['entry'])
-  df = df.dropna(subset=['price'])
+  df["price"] = df["price"].fillna(df["entry"])
+  df = df.dropna(subset=["price"])
 
   if df.empty:
     return False
@@ -392,69 +392,61 @@ def run_scan():
   move = df.apply(
       lambda r: (
           (r.entry - r.price) / r.entry * 100
-          if r.side == 'LONG'
+          if r.side == "LONG"
           else (r.price - r.entry) / r.entry * 100
       ),
       axis=1,
   )
-  df['loss_pct'] = move * (df.leverage if USE_LEVERAGE else 1)
+  df["loss_pct"] = move * (df.leverage if USE_LEVERAGE else 1)
 
-  all_sum = summarize(df, ['coin', 'side']).assign(exchange='ALL')
-  ex_sum = summarize(df, ['exchange', 'coin', 'side'])
+  all_sum = summarize(df, ["coin", "side"]).assign(exchange="ALL")
+  ex_sum = summarize(df, ["exchange", "coin", "side"])
   main_tbl = pd.concat([all_sum, ex_sum]).sort_values(
-      ['coin', 'side', 'exchange']
+      ["coin", "side", "exchange"]
   )
 
   flt = df[(df.loss_pct >= MIN_LOSS) & (df.loss_pct <= MAX_LOSS)]
   if len(flt) > 0:
-    flt_all = summarize(flt, ['coin', 'side']).assign(exchange='ALL')
-    flt_ex = summarize(flt, ['exchange', 'coin', 'side'])
+    flt_all = summarize(flt, ["coin", "side"]).assign(exchange="ALL")
+    flt_ex = summarize(flt, ["exchange", "coin", "side"])
     flt_tbl = pd.concat([flt_all, flt_ex]).sort_values(
-        ['coin', 'side', 'exchange']
+        ["coin", "side", "exchange"]
     )
   else:
     flt_tbl = pd.DataFrame(
         columns=[
-            'coin',
-            'side',
-            'exchange',
-            'trader_sayisi',
-            'pozisyon_buyuklugu_AUM',
-            'ort_giris',
+            "coin",
+            "side",
+            "exchange",
+            "trader_sayisi",
+            "pozisyon_buyuklugu_AUM",
+            "ort_giris",
         ]
     )
 
-  with pd.ExcelWriter('copytrade_rapor.xlsx', engine='openpyxl') as w:
-    main_tbl.to_excel(w, sheet_name='Tum_Pozisyonlar', index=False)
+  with pd.ExcelWriter("copytrade_rapor.xlsx", engine="openpyxl") as w:
+    main_tbl.to_excel(w, sheet_name="Tum_Pozisyonlar", index=False)
     flt_tbl.to_excel(
-        w, sheet_name=f'Terste_%{int(MIN_LOSS)}-{int(MAX_LOSS)}', index=False
+        w, sheet_name=f"Terste_%{int(MIN_LOSS)}-{int(MAX_LOSS)}", index=False
     )
-    df.to_excel(w, sheet_name='Ham_Veri', index=False)
+    df.to_excel(w, sheet_name="Ham_Veri", index=False)
   return True
 
 
 # ==========================================
-# 2. BÖLÜM: GÖRSEL TARZI STREAMLIT ARAYÜZÜ
+# 2. BÖLÜM: GELİŞMİŞ GÖRSEL ARAYÜZ (GÖNDERDİĞİNİZ ÖRNEK)
 # ==========================================
 
 st.set_page_config(
-    page_title='Ağırlıklı Ortalama Girişler - Smart Money', layout='centered'
+    page_title="Ağırlıklı Ortalama Girişler - Terminal", layout="centered"
 )
 
-# Özel CSS ile görseldeki koyu tema ve kart tasarımını birebir uyguluyoruz
 st.markdown(
     """
     <style>
     .stApp {
-        background-color: #0e1117;
-        color: #ffffff;
-    }
-    .card-box {
-        background-color: #161b22;
-        border: 1px solid #30363d;
-        padding: 20px;
-        border-radius: 12px;
-        margin-bottom: 15px;
+        background-color: #0d1117;
+        color: #c9d1d9;
     }
     .long-card {
         background-color: #11221c;
@@ -481,149 +473,115 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.markdown('### 📊 Ağırlıklı Ortalama Girişler')
-st.markdown('---')
-
-# Tarama Butonu ve Durum
-col_btn1, col_btn2 = st.columns([3, 1])
-with col_btn1:
-  if st.button('🔄 Borsaları Güncelle ve Verileri Çek'):
-    with st.spinner('Tüm borsalar taranıyor...'):
+# Üst Güncelleme Butonu
+col_b1, col_b2 = st.columns([3, 1])
+with col_b1:
+  if st.button("🔄 Borsaları Güncelle"):
+    with st.spinner("Veriler taranıyor..."):
       if run_scan():
-        st.success('Güncellendi!')
+        st.success("Başarılı!")
         st.rerun()
       else:
-        st.error('Veri alınamadı.')
+        st.error("Veri alınamadı.")
 
-rapor_yolu = 'copytrade_rapor.xlsx'
+rapor_yolu = "copytrade_rapor.xlsx"
 
 if os.path.exists(rapor_yolu):
   try:
-    df_tum = pd.read_excel(rapor_yolu, sheet_name='Tum_Pozisyonlar')
-    df_terste = pd.read_excel(rapor_yolu, sheet_name='Terste_%6-20')
+    df_tum = pd.read_excel(rapor_yolu, sheet_name="Tum_Pozisyonlar")
+    df_terste = pd.read_excel(rapor_yolu, sheet_name=f"Terste_%{int(MIN_LOSS)}-{int(MAX_LOSS)}")
 
-    coins = (
-        sorted(list(df_tum['coin'].unique()))
-        if 'coin' in df_tum.columns and not df_tum.empty
-        else []
+    # Görseldeki Üst Kategori Butonları (Radio grubu)
+    st.markdown("<p style='text-align: center; color: #8b949e; font-size: 14px;'>Veri Kaynağı Seçin:</p>", unsafe_allow_html=True)
+    
+    source_mode = st.radio(
+        "Veri Kaynağı",
+        [
+            "Sadece Copy Liderler",
+            "Sadece Balinalar",
+            "Genel Terste Kalanlar (%6-20)",
+            "TOP 30 Terste Kalan Altcoinler",
+            "TOP 30 Oransal",
+            "Genel Terste Kalanlar"
+        ],
+        horizontal=True,
+        label_visibility="collapsed"
     )
 
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Cache Bilgisi ve Güncel / Geçmiş Sekmeleri
+    c_col1, c_col2 = st.columns(spec=[2, 3])
+    with c_col1:
+      st.markdown("<small style='color: #8b949e;'>⚡ Cache yenilenme: 4:52</small>", unsafe_allow_html=True)
+    with c_col2:
+      tab_secim = st.radio("Zaman", ["📈 Güncel", "🕒 Geçmiş"], horizontal=True, label_visibility="collapsed")
+
+    st.markdown("---")
+
+    coins = sorted(list(df_tum["coin"].unique())) if "coin" in df_tum.columns and not df_tum.empty else []
+
     if coins:
-      # Veri Kaynağı Simülasyon Sekmeleri (Görseldeki gibi)
-      st.markdown('**Veri Kaynağı Seçin:**')
-      source_tab = st.radio(
-          'Kaynak',
-          [
-              'Sadece Copy Liderler',
-              'Sadece Balinalar',
-              'Tümü',
-              'Veritabanı',
-          ],
-          horizontal=True,
-          label_visibility='collapsed',
-      )
+      selected_coin = st.selectbox("🔍 Coin Seçin:", coins)
+      st.markdown(f"<h3 style='text-align: center; color: #f0f6fc; margin-top: 10px;'>{selected_coin}USDT</h3>", unsafe_allow_html=True)
 
-      selected_coin = st.selectbox('🔍 Coin Seçin:', coins)
-      st.markdown('---')
+      # Mod ve filtrelere göre veri seçimi
+      active_df = df_terste if "Terste" in source_mode else df_tum
 
-      # Seçilen coin için verileri filtrele
-      coin_data = df_tum[
-          (df_tum['coin'] == selected_coin) & (df_tum['exchange'] == 'ALL')
-      ]
+      coin_data = active_df[(active_df["coin"] == selected_coin) & (active_df["exchange"] == "ALL")]
 
-      long_row = coin_data[coin_data['side'] == 'LONG']
-      short_row = coin_data[coin_data['side'] == 'SHORT']
+      long_row = coin_data[coin_data["side"] == "LONG"]
+      short_row = coin_data[coin_data["side"] == "SHORT"]
 
-      long_price = (
-          long_row['ort_giris'].values[0] if not long_row.empty else 0
-      )
-      long_count = (
-          int(long_row['trader_sayisi'].values[0]) if not long_row.empty else 0
-      )
-      long_aum = (
-          long_row['pozisyon_buyuklugu_AUM'].values[0]
-          if not long_row.empty
-          else 0
-      )
+      long_price = long_row["ort_giris"].values[0] if not long_row.empty else 0
+      long_count = int(long_row["trader_sayisi"].values[0]) if not long_row.empty else 0
+      long_aum = long_row["pozisyon_buyuklugu_AUM"].values[0] if not long_row.empty else 0
 
-      short_price = (
-          short_row['ort_giris'].values[0] if not short_row.empty else 0
-      )
-      short_count = (
-          int(short_row['trader_sayisi'].values[0])
-          if not short_row.empty
-          else 0
-      )
-      short_aum = (
-          short_row['pozisyon_buyuklugu_AUM'].values[0]
-          if not short_row.empty
-          else 0
-      )
+      short_price = short_row["ort_giris"].values[0] if not short_row.empty else 0
+      short_count = int(short_row["trader_sayisi"].values[0]) if not short_row.empty else 0
+      short_aum = short_row["pozisyon_buyuklugu_AUM"].values[0] if not short_row.empty else 0
 
-      genel_ort = (
-          (long_price + short_price) / 2 if long_price and short_price else 0
-      )
+      genel_ort = (long_price + short_price) / 2 if (long_price > 0 and short_price > 0) else (long_price or short_price)
 
-      st.markdown(
-          f"<h2 style='text-align: center; color: #f0f6fc;'>{selected_coin}USDT</h2>",
-          unsafe_allow_html=True,
-      )
-
-      # Görseldeki Long Kartı
+      # LONG Kartı
       st.markdown(
           f"""
             <div class="long-card">
-                <span style="color: #238636; font-weight: bold; font-size: 16px;">🟢 LONG Ort. Giriş:</span>
-                <span style="float: right; color: #3fb950; font-weight: bold; font-size: 20px;">${long_price:,.2f}</span><br>
+                <span style="color: #238636; font-weight: bold; font-size: 15px;">🟢 LONG Ort. Giriş:</span>
+                <span style="float: right; color: #3fb950; font-weight: bold; font-size: 18px;">${long_price:,.4f}</span><br>
                 <small style="color: #8b949e;">({long_count} işlem, ${long_aum:,.2f} size)</small>
             </div>
             """,
           unsafe_allow_html=True,
       )
 
-      # Görseldeki Short Kartı
+      # SHORT Kartı
       st.markdown(
           f"""
             <div class="short-card">
-                <span style="color: #da3633; font-weight: bold; font-size: 16px;">🔴 SHORT Ort. Giriş:</span>
-                <span style="float: right; color: #f85149; font-weight: bold; font-size: 20px;">${short_price:,.2f}</span><br>
+                <span style="color: #da3633; font-weight: bold; font-size: 15px;">🔴 SHORT Ort. Giriş:</span>
+                <span style="float: right; color: #f85149; font-weight: bold; font-size: 18px;">${short_price:,.4f}</span><br>
                 <small style="color: #8b949e;">({short_count} işlem, ${short_aum:,.2f} size)</small>
             </div>
             """,
           unsafe_allow_html=True,
       )
 
-      # Görseldeki Ortalama Giriş Kartı
+      # Ortalama Giriş Kartı
       st.markdown(
           f"""
             <div class="neutral-card">
-                <span style="color: #c9d1d9; font-weight: bold; font-size: 16px;">⚪ Ortalama Giriş:</span>
-                <span style="float: right; color: #e3b341; font-weight: bold; font-size: 20px;">${genel_ort:,.2f}</span>
+                <span style="color: #c9d1d9; font-weight: bold; font-size: 15px;">⚪ Ortalama Giriş:</span>
+                <span style="float: right; color: #e3b341; font-weight: bold; font-size: 18px;">${genel_ort:,.4f}</span>
             </div>
             """,
           unsafe_allow_html=True,
       )
 
-      st.markdown('---')
-      with st.expander(
-          '⚠️ %6 - %20 Zararda (Terste) Kalan Detaylı Liste', expanded=False
-      ):
-        if not df_terste.empty and 'coin' in df_terste.columns:
-          coin_terste = df_terste[df_terste['coin'] == selected_coin]
-          if not coin_terste.empty:
-            st.dataframe(coin_terste, use_container_width=True)
-          else:
-            st.info('Bu coinde bu aralıkta terste kalan trader yok.')
-        else:
-          st.info('Veri bulunamadı.')
-
     else:
-      st.warning('Tabloda coin verisi bulunamadı.')
+      st.warning("Tabloda coin verisi bulunamadı.")
 
   except Exception as e:
-    st.error(f'Görselleştirme hatası: {e}')
+    st.error(f"Arayüz yüklenirken hata oluştu: {e}")
 else:
-  st.info(
-      'Henüz veri taranmadı. Lütfen yukarıdaki **"Borsaları Güncelle ve Verileri'
-      ' Çek"** butonuna basın.'
-  )
+  st.info("Henüz veri taranmadı. Lütfen yukarıdaki **'Borsaları Güncelle'** butonuna basın.")
