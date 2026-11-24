@@ -1,12 +1,1163 @@
 import os
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template_string
 
 app = Flask(__name__)
+
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Canlı Grafik • EMA, RSI, Hacim, İzleme Listesi & Alarmlar</title>
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 14px;
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      flex-wrap: wrap;
+    }
+    select, button {
+      background: #21262d;
+      color: #e6edf3;
+      border: 1px solid #30363d;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    button:hover { border-color: #58a6ff; }
+    button.active {
+      background: #1f6feb;
+      border-color: #388bfd;
+    }
+    button.draw-active {
+      background: #9e6a03;
+      border-color: #d29922;
+      color: #fff;
+    }
+    button.muted {
+      color: #8b949e;
+      opacity: 0.75;
+    }
+    .legend {
+      display: flex;
+      gap: 12px;
+      font-size: 13px;
+      color: #9da7b3;
+      align-items: center;
+    }
+    .status {
+      margin-left: auto;
+      font-size: 12px;
+      color: #8b949e;
+      font-variant-numeric: tabular-nums;
+    }
+    .alert-banner {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 14px;
+      background: #2b1d05;
+      border-bottom: 1px solid #d29922;
+      color: #f2cc60;
+      font-size: 13px;
+      animation: pulseAlert 1s ease-in-out 2;
+    }
+    .alert-banner.visible { display: flex; }
+    .alert-banner.bull {
+      background: #0d2818;
+      border-color: #2ea043;
+      color: #56d364;
+    }
+    .alert-banner.bear {
+      background: #2d1117;
+      border-color: #f85149;
+      color: #ff7b72;
+    }
+    @keyframes pulseAlert {
+      0%, 100% { filter: brightness(1); }
+      50% { filter: brightness(1.25); }
+    }
+    .dismiss-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: inherit;
+      padding: 3px 8px;
+      font-size: 12px;
+      border-radius: 4px;
+    }
+    .workspace {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      width: 100%;
+    }
+    #chart-wrapper {
+      position: relative;
+      flex: 1;
+      min-width: 0;
+      height: 100%;
+    }
+    #chart-container {
+      width: 100%;
+      height: 100%;
+    }
+    #chart-wrapper.crosshair-draw {
+      cursor: crosshair;
+    }
+    .sidebar {
+      width: 300px;
+      background: #161b22;
+      border-left: 1px solid #30363d;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .panel-section {
+      display: flex;
+      flex-direction: column;
+      border-bottom: 1px solid #30363d;
+    }
+    .panel-header {
+      padding: 8px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #8b949e;
+      background: #1c2128;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .watchlist {
+      max-height: 36%;
+      overflow-y: auto;
+    }
+    .watch-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      border-bottom: 1px solid #21262d;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .watch-item:hover { background: #1f242c; }
+    .watch-item.selected {
+      background: #1f2937;
+      border-left: 3px solid #1f6feb;
+    }
+    .watch-symbol { font-weight: 600; }
+    .watch-right { text-align: right; }
+    .watch-price { font-variant-numeric: tabular-nums; font-weight: 500; }
+    .watch-change { font-size: 11px; font-variant-numeric: tabular-nums; }
+    .up { color: #3fb950; }
+    .down { color: #f85149; }
+
+    .levels-panel {
+      flex: 1;
+      min-height: 120px;
+      display: flex;
+      flex-direction: column;
+      border-bottom: 1px solid #30363d;
+    }
+    .alerts-panel {
+      flex: 1;
+      min-height: 130px;
+      display: flex;
+      flex-direction: column;
+    }
+    .scroll-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+    .level-item, .alarm-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      font-size: 12px;
+      border-bottom: 1px solid #21262d;
+    }
+    .level-price {
+      color: #e3b341;
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+    }
+    .alarm-msg {
+      line-height: 1.3;
+      color: #e6edf3;
+    }
+    .alarm-msg.bull { color: #56d364; }
+    .alarm-msg.bear { color: #ff7b72; }
+    .alarm-msg.neutral { color: #f2cc60; }
+    .alarm-time {
+      font-size: 10px;
+      color: #8b949e;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .del-btn {
+      background: transparent;
+      border: 1px solid #30363d;
+      color: #f85149;
+      padding: 2px 7px;
+      font-size: 11px;
+      border-radius: 4px;
+    }
+    .del-btn:hover { background: #da363322; border-color: #f85149; }
+    .empty-note {
+      padding: 10px 12px;
+      font-size: 12px;
+      color: #8b949e;
+      line-height: 1.4;
+    }
+    @media (max-width: 768px) {
+      .workspace { flex-direction: column; }
+      .sidebar { width: 100%; height: 280px; border-left: none; border-top: 1px solid #30363d; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <select id="symbol-select">
+      <option value="BTCUSDT">BTC/USDT</option>
+      <option value="ETHUSDT">ETH/USDT</option>
+      <option value="SOLUSDT">SOL/USDT</option>
+      <option value="BNBUSDT">BNB/USDT</option>
+      <option value="XRPUSDT">XRP/USDT</option>
+      <option value="AVAXUSDT">AVAX/USDT</option>
+    </select>
+
+    <div id="interval-buttons">
+      <button data-interval="1m" class="active">1m</button>
+      <button data-interval="5m">5m</button>
+      <button data-interval="15m">15m</button>
+      <button data-interval="1h">1h</button>
+    </div>
+
+    <button id="draw-hline-btn">+ Yatay Çizgi</button>
+    <button id="clear-hlines-btn">Çizgileri Temizle</button>
+    <button id="toggle-alarms-btn" class="active">Alarmlar: Açık</button>
+    <button id="toggle-sound-btn" class="active">Ses: Açık</button>
+
+    <div class="legend">
+      <span><b style="color:#58a6ff">EMA(20)</b>: <span id="ema-val">-</span></span>
+      <span><b style="color:#d2a8ff">RSI(14)</b>: <span id="rsi-val">-</span></span>
+      <span><b style="color:#79c0ff">Vol</b>: <span id="vol-val">-</span></span>
+    </div>
+
+    <span class="status" id="status-text">Bağlanıyor...</span>
+  </div>
+
+  <div id="alert-banner" class="alert-banner">
+    <span id="alert-banner-text">-</span>
+    <button id="dismiss-banner-btn" class="dismiss-btn">Kapat</button>
+  </div>
+
+  <div class="workspace">
+    <div id="chart-wrapper">
+      <div id="chart-container"></div>
+    </div>
+
+    <aside class="sidebar">
+      <div class="panel-section watchlist">
+        <div class="panel-header">
+          <span>İzleme Listesi</span>
+          <span>24s %</span>
+        </div>
+        <div id="watchlist-container"></div>
+      </div>
+
+      <div class="levels-panel">
+        <div class="panel-header">
+          <span>Yatay Seviyeler (<span id="levels-symbol">BTCUSDT</span>)</span>
+          <span id="levels-count">0</span>
+        </div>
+        <div class="scroll-list" id="levels-list"></div>
+      </div>
+
+      <div class="alerts-panel">
+        <div class="panel-header">
+          <span>Alarm Geçmişi</span>
+          <button id="clear-alerts-btn" class="del-btn">Temizle</button>
+        </div>
+        <div class="scroll-list" id="alerts-list"></div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    const WATCH_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "AVAXUSDT"];
+    const STORAGE_KEY = "tv_custom_hlines_v1";
+    const STALE_TIMEOUT_MS = 15000;
+    const ALARM_COOLDOWN_MS = 30000;
+
+    const chartWrapper = document.getElementById("chart-wrapper");
+    const container = document.getElementById("chart-container");
+    const symbolSelect = document.getElementById("symbol-select");
+    const statusText = document.getElementById("status-text");
+    const intervalButtons = document.querySelectorAll("#interval-buttons button");
+    const drawHlineBtn = document.getElementById("draw-hline-btn");
+    const clearHlinesBtn = document.getElementById("clear-hlines-btn");
+    const toggleAlarmsBtn = document.getElementById("toggle-alarms-btn");
+    const toggleSoundBtn = document.getElementById("toggle-sound-btn");
+    const clearAlertsBtn = document.getElementById("clear-alerts-btn");
+
+    const alertBanner = document.getElementById("alert-banner");
+    const alertBannerText = document.getElementById("alert-banner-text");
+    const dismissBannerBtn = document.getElementById("dismiss-banner-btn");
+
+    const emaValEl = document.getElementById("ema-val");
+    const rsiValEl = document.getElementById("rsi-val");
+    const volValEl = document.getElementById("vol-val");
+
+    const watchlistContainer = document.getElementById("watchlist-container");
+    const levelsListEl = document.getElementById("levels-list");
+    const levelsSymbolEl = document.getElementById("levels-symbol");
+    const levelsCountEl = document.getElementById("levels-count");
+    const alertsListEl = document.getElementById("alerts-list");
+
+    let currentSymbol = symbolSelect.value;
+    let currentInterval = "1m";
+    let isDrawMode = false;
+    let alarmsEnabled = true;
+    let soundEnabled = true;
+    let marketSwitchSeq = 0;
+
+    let candlesHistory = [];
+    let lastEma = null;
+    let avgGain = null;
+    let avgLoss = null;
+    let activePriceLines = [];
+
+    let prevPriceDiffEma = null;
+    let prevRsiZone = null;
+    const alarmCooldownMap = new Map();
+    const alarmLogs = [];
+    let audioCtx = null;
+
+    let pendingBar = null;
+    const pendingTickers = new Map();
+    let rafId = null;
+
+    function playAlertSound(kind = "neutral") {
+      if (!soundEnabled) return;
+      try {
+        if (!audioCtx) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          audioCtx = new AudioContextClass();
+        }
+        if (audioCtx.state === "suspended") {
+          audioCtx.resume();
+        }
+
+        const now = audioCtx.currentTime;
+        const freqs = kind === "bull" ? [660, 880] : kind === "bear" ? [520, 390] : [740, 740];
+
+        freqs.forEach((freq, idx) => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, now + idx * 0.14);
+
+          gain.gain.setValueAtTime(0.0001, now + idx * 0.14);
+          gain.gain.exponentialRampToValueAtTime(0.12, now + idx * 0.14 + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.14 + 0.13);
+
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(now + idx * 0.14);
+          osc.stop(now + idx * 0.14 + 0.14);
+        });
+      } catch {}
+    }
+
+    function renderAlarmLogs() {
+      if (alarmLogs.length === 0) {
+        alertsListEl.innerHTML = `<div class="empty-note">Henüz tetiklenen alarm yok.</div>`;
+        return;
+      }
+      alertsListEl.innerHTML = alarmLogs
+        .map(
+          (item) => `
+          <div class="alarm-item">
+            <span class="alarm-msg ${item.kind}">${item.message}</span>
+            <span class="alarm-time">${item.timeStr}</span>
+          </div>
+        `
+        )
+        .join("");
+    }
+
+    function triggerAlarm(key, message, kind = "neutral") {
+      if (!alarmsEnabled) return;
+      const now = Date.now();
+      const lastTriggered = alarmCooldownMap.get(key) || 0;
+      if (now - lastTriggered < ALARM_COOLDOWN_MS) return;
+
+      alarmCooldownMap.set(key, now);
+
+      alertBanner.className = `alert-banner visible ${kind}`;
+      alertBannerText.textContent = message;
+
+      const timeStr = new Date(now).toLocaleTimeString("tr-TR", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+
+      alarmLogs.unshift({ message, timeStr, kind });
+      if (alarmLogs.length > 30) alarmLogs.pop();
+      renderAlarmLogs();
+      playAlertSound(kind);
+    }
+
+    function evaluateAlerts(bar, emaVal, rsiVal) {
+      if (!alarmsEnabled || !bar) return;
+
+      if (typeof emaVal === "number" && Number.isFinite(emaVal)) {
+        const diff = bar.close - emaVal;
+        if (prevPriceDiffEma !== null) {
+          if (prevPriceDiffEma <= 0 && diff > 0) {
+            triggerAlarm(
+              `ema_cross_up_${currentSymbol}`,
+              `${currentSymbol}: Fiyat EMA(20) (${formatPrice(currentSymbol, emaVal)}) üzerine çıktı.`,
+              "bull"
+            );
+          } else if (prevPriceDiffEma >= 0 && diff < 0) {
+            triggerAlarm(
+              `ema_cross_down_${currentSymbol}`,
+              `${currentSymbol}: Fiyat EMA(20) (${formatPrice(currentSymbol, emaVal)}) altına indi.`,
+              "bear"
+            );
+          }
+        }
+        prevPriceDiffEma = diff;
+      }
+
+      if (typeof rsiVal === "number" && Number.isFinite(rsiVal)) {
+        const currentZone = rsiVal >= 70 ? "high" : rsiVal <= 30 ? "low" : "mid";
+        if (currentZone === "high" && prevRsiZone !== "high") {
+          triggerAlarm(
+            `rsi_70_${currentSymbol}`,
+            `${currentSymbol}: RSI(14) aşırı alım bölgesinde (${rsiVal.toFixed(1)} ≥ 70).`,
+            "bear"
+          );
+        } else if (currentZone === "low" && prevRsiZone !== "low") {
+          triggerAlarm(
+            `rsi_30_${currentSymbol}`,
+            `${currentSymbol}: RSI(14) aşırı satım bölgesinde (${rsiVal.toFixed(1)} ≤ 30).`,
+            "bull"
+          );
+        }
+        prevRsiZone = currentZone;
+      }
+
+      const map = loadSavedLevelsMap();
+      const levels = map[currentSymbol] || [];
+      levels.forEach((lvl) => {
+        const touched = bar.low <= lvl.price && bar.high >= lvl.price;
+        if (touched) {
+          triggerAlarm(
+            `hline_touch_${currentSymbol}_${lvl.price}`,
+            `${currentSymbol}: Fiyat ${formatPrice(currentSymbol, lvl.price)} yatay seviyesine temas etti.`,
+            "neutral"
+          );
+        }
+      });
+    }
+
+    dismissBannerBtn.addEventListener("click", () => {
+      alertBanner.className = "alert-banner";
+    });
+
+    toggleAlarmsBtn.addEventListener("click", () => {
+      alarmsEnabled = !alarmsEnabled;
+      toggleAlarmsBtn.classList.toggle("active", alarmsEnabled);
+      toggleAlarmsBtn.classList.toggle("muted", !alarmsEnabled);
+      toggleAlarmsBtn.textContent = alarmsEnabled ? "Alarmlar: Açık" : "Alarmlar: Kapalı";
+    });
+
+    toggleSoundBtn.addEventListener("click", () => {
+      soundEnabled = !soundEnabled;
+      toggleSoundBtn.classList.toggle("active", soundEnabled);
+      toggleSoundBtn.classList.toggle("muted", !soundEnabled);
+      toggleSoundBtn.textContent = soundEnabled ? "Ses: Açık" : "Ses: Kapalı";
+      if (soundEnabled) playAlertSound("bull");
+    });
+
+    clearAlertsBtn.addEventListener("click", () => {
+      alarmLogs.length = 0;
+      renderAlarmLogs();
+    });
+
+    class ResilientSocket {
+      constructor({ name, buildUrl, onMessage, onStatus }) {
+        this.name = name;
+        this.buildUrl = buildUrl;
+        this.onMessage = onMessage;
+        this.onStatus = onStatus || (() => {});
+        this.ws = null;
+        this.reconnectTimer = null;
+        this.watchdogTimer = null;
+        this.attempt = 0;
+        this.gen = 0;
+        this.closedByUser = false;
+      }
+
+      start() {
+        this.closedByUser = false;
+        this.gen += 1;
+        this.attempt = 0;
+        this._clearTimers();
+        this._detachAndCloseCurrent();
+        this._open(this.gen);
+      }
+
+      stop() {
+        this.closedByUser = true;
+        this.gen += 1;
+        this._clearTimers();
+        this._detachAndCloseCurrent();
+      }
+
+      _clearTimers() {
+        clearTimeout(this.reconnectTimer);
+        clearInterval(this.watchdogTimer);
+        this.reconnectTimer = null;
+        this.watchdogTimer = null;
+      }
+
+      _detachAndCloseCurrent() {
+        if (!this.ws) return;
+        const oldWs = this.ws;
+        this.ws = null;
+        oldWs.onopen = null;
+        oldWs.onmessage = null;
+        oldWs.onerror = null;
+        oldWs.onclose = null;
+        if (oldWs.readyState === WebSocket.OPEN || oldWs.readyState === WebSocket.CONNECTING) {
+          oldWs.close();
+        }
+      }
+
+      _open(gen) {
+        if (this.closedByUser || gen !== this.gen) return;
+        const url = this.buildUrl();
+        this.onStatus(this.attempt > 0 ? `Yeniden bağlanıyor (#${this.attempt})...` : "Bağlanıyor...");
+
+        const socket = new WebSocket(url);
+        this.ws = socket;
+        let lastMsgAt = Date.now();
+
+        this.watchdogTimer = setInterval(() => {
+          if (gen !== this.gen || this.closedByUser) return;
+          if (Date.now() - lastMsgAt > STALE_TIMEOUT_MS) {
+            this.onStatus("Akış yanıt vermiyor, yenileniyor...");
+            this._detachAndCloseCurrent();
+            this._scheduleReconnect(gen);
+          }
+        }, 4000);
+
+        socket.onopen = () => {
+          if (gen !== this.gen) return;
+          this.attempt = 0;
+          lastMsgAt = Date.now();
+          this.onStatus("Canlı");
+        };
+
+        socket.onmessage = (event) => {
+          if (gen !== this.gen) return;
+          lastMsgAt = Date.now();
+          this.onMessage(event.data);
+        };
+
+        socket.onerror = () => {
+          if (gen !== this.gen) return;
+          this.onStatus("Bağlantı hatası...");
+        };
+
+        socket.onclose = () => {
+          if (gen !== this.gen || this.closedByUser) return;
+          clearInterval(this.watchdogTimer);
+          this._scheduleReconnect(gen);
+        };
+      }
+
+      _scheduleReconnect(gen) {
+        if (this.closedByUser || gen !== this.gen) return;
+        clearTimeout(this.reconnectTimer);
+        this.attempt += 1;
+        const expDelay = Math.min(20000, 1000 * Math.pow(2, Math.min(this.attempt - 1, 4)));
+        const jitter = Math.floor(Math.random() * 400);
+        const waitMs = expDelay + jitter;
+        this.onStatus(`${(waitMs / 1000).toFixed(1)}s içinde yeniden bağlanacak...`);
+        this.reconnectTimer = setTimeout(() => this._open(gen), waitMs);
+      }
+    }
+
+    const chart = LightweightCharts.createChart(container, {
+      layout: {
+        background: { color: "#0d1117" },
+        textColor: "#c9d1d9",
+      },
+      grid: {
+        vertLines: { color: "#1f242c" },
+        horzLines: { color: "#1f242c" },
+      },
+      crosshair: {
+        mode: LightweightCharts.CrosshairMode.Normal,
+      },
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: false,
+        borderColor: "#30363d",
+      },
+      rightPriceScale: {
+        borderColor: "#30363d",
+        scaleMargins: {
+          top: 0.06,
+          bottom: 0.54,
+        },
+      },
+    });
+
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: "#26a69a",
+      downColor: "#ef5350",
+      borderVisible: false,
+      wickUpColor: "#26a69a",
+      wickDownColor: "#ef5350",
+      priceScaleId: "right",
+    });
+
+    const emaSeries = chart.addLineSeries({
+      color: "#58a6ff",
+      lineWidth: 2,
+      priceScaleId: "right",
+    });
+
+    const volumeSeries = chart.addHistogramSeries({
+      priceFormat: { type: "volume" },
+      priceScaleId: "volume",
+    });
+
+    chart.priceScale("volume").applyOptions({
+      scaleMargins: { top: 0.56, bottom: 0.24 },
+      borderVisible: false,
+    });
+
+    const rsiSeries = chart.addLineSeries({
+      color: "#d2a8ff",
+      lineWidth: 2,
+      priceScaleId: "rsi",
+    });
+
+    chart.priceScale("rsi").applyOptions({
+      scaleMargins: { top: 0.78, bottom: 0.03 },
+      borderVisible: false,
+    });
+
+    rsiSeries.createPriceLine({
+      price: 70,
+      color: "#ef535066",
+      lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: "70",
+    });
+
+    rsiSeries.createPriceLine({
+      price: 30,
+      color: "#26a69a66",
+      lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: "30",
+    });
+
+    function formatPrice(symbol, price) {
+      const num = Number(price);
+      if (!Number.isFinite(num)) return "-";
+      if (symbol === "XRPUSDT") return num.toFixed(4);
+      if (symbol === "SOLUSDT" || symbol === "AVAXUSDT") return num.toFixed(3);
+      if (Math.abs(num) < 1) return num.toFixed(6);
+      if (Math.abs(num) < 100) return num.toFixed(4);
+      return num.toFixed(2);
+    }
+
+    function loadSavedLevelsMap() {
+      try {
+        return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+      } catch {
+        return {};
+      }
+    }
+
+    function saveLevelsMap(map) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+    }
+
+    function clearRenderedPriceLines() {
+      activePriceLines.forEach((item) => {
+        candleSeries.removePriceLine(item.lineObj);
+      });
+      activePriceLines = [];
+    }
+
+    function renderLevelsForSymbol(symbol) {
+      clearRenderedPriceLines();
+      const map = loadSavedLevelsMap();
+      const levels = map[symbol] || [];
+
+      levels.forEach((lvl) => {
+        const lineObj = candleSeries.createPriceLine({
+          price: lvl.price,
+          color: "#e3b341",
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Solid,
+          axisLabelVisible: true,
+          title: "S/R",
+        });
+        activePriceLines.push({ id: lvl.id, price: lvl.price, lineObj });
+      });
+
+      renderLevelsSidebar(symbol, levels);
+    }
+
+    function renderLevelsSidebar(symbol, levels) {
+      levelsSymbolEl.textContent = symbol;
+      levelsCountEl.textContent = levels.length;
+
+      if (levels.length === 0) {
+        levelsListEl.innerHTML = `<div class="empty-note">"+ Yatay Çizgi" ile grafikte seviye ekle.</div>`;
+        return;
+      }
+
+      const sorted = [...levels].sort((a, b) => b.price - a.price);
+      levelsListEl.innerHTML = sorted
+        .map(
+          (lvl) => `
+          <div class="level-item">
+            <span class="level-price">${formatPrice(symbol, lvl.price)}</span>
+            <button class="del-btn" data-id="${lvl.id}">Sil</button>
+          </div>
+        `
+        )
+        .join("");
+
+      levelsListEl.querySelectorAll(".del-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          removeHorizontalLevel(symbol, btn.dataset.id);
+        });
+      });
+    }
+
+    function addHorizontalLevel(symbol, price) {
+      const roundedPrice = Number(formatPrice(symbol, price));
+      const map = loadSavedLevelsMap();
+      if (!map[symbol]) map[symbol] = [];
+
+      map[symbol].push({
+        id: String(Date.now()) + Math.random().toString(16).slice(2, 6),
+        price: roundedPrice,
+      });
+
+      saveLevelsMap(map);
+      renderLevelsForSymbol(symbol);
+    }
+
+    function removeHorizontalLevel(symbol, id) {
+      const map = loadSavedLevelsMap();
+      if (!map[symbol]) return;
+      map[symbol] = map[symbol].filter((item) => item.id !== id);
+      saveLevelsMap(map);
+      renderLevelsForSymbol(symbol);
+    }
+
+    function setDrawMode(enabled) {
+      isDrawMode = enabled;
+      drawHlineBtn.classList.toggle("draw-active", enabled);
+      drawHlineBtn.textContent = enabled ? "Çizim Aktif (Tıkla)" : "+ Yatay Çizgi";
+      chartWrapper.classList.toggle("crosshair-draw", enabled);
+    }
+
+    drawHlineBtn.addEventListener("click", () => setDrawMode(!isDrawMode));
+
+    clearHlinesBtn.addEventListener("click", () => {
+      const map = loadSavedLevelsMap();
+      map[currentSymbol] = [];
+      saveLevelsMap(map);
+      renderLevelsForSymbol(currentSymbol);
+    });
+
+    chart.subscribeClick((param) => {
+      if (!isDrawMode || !param.point) return;
+      const price = candleSeries.coordinateToPrice(param.point.y);
+      if (price !== null && !Number.isNaN(price)) {
+        addHorizontalLevel(currentSymbol, price);
+        setDrawMode(false);
+      }
+    });
+
+    function initWatchlistUI() {
+      watchlistContainer.innerHTML = WATCH_SYMBOLS.map(
+        (sym) => `
+        <div class="watch-item ${sym === currentSymbol ? "selected" : ""}" data-symbol="${sym}">
+          <span class="watch-symbol">${sym.replace("USDT", "/USDT")}</span>
+          <div class="watch-right">
+            <div class="watch-price" id="wp-${sym}">-</div>
+            <div class="watch-change" id="wc-${sym}">0.00%</div>
+          </div>
+        </div>
+      `
+      ).join("");
+
+      watchlistContainer.querySelectorAll(".watch-item").forEach((el) => {
+        el.addEventListener("click", () => {
+          const sym = el.dataset.symbol;
+          if (sym !== currentSymbol) {
+            symbolSelect.value = sym;
+            switchMarket(sym, currentInterval);
+          }
+        });
+      });
+    }
+
+    function highlightActiveWatchItem(symbol) {
+      watchlistContainer.querySelectorAll(".watch-item").forEach((el) => {
+        el.classList.toggle("selected", el.dataset.symbol === symbol);
+      });
+    }
+
+    function getVolumeBar(candle) {
+      const isUp = candle.close >= candle.open;
+      return {
+        time: candle.time,
+        value: candle.volume,
+        color: isUp ? "rgba(38, 166, 154, 0.45)" : "rgba(239, 83, 80, 0.45)",
+      };
+    }
+
+    function getRsiColor(value) {
+      if (value >= 70) return "#ff7b72";
+      if (value <= 30) return "#3fb950";
+      return "#d2a8ff";
+    }
+
+    function buildIndicators(candles, emaPeriod = 20, rsiPeriod = 14) {
+      lastEma = null;
+      avgGain = null;
+      avgLoss = null;
+
+      const emaData = [];
+      const rsiData = [];
+
+      if (candles.length >= emaPeriod) {
+        const k = 2 / (emaPeriod + 1);
+        let sum = 0;
+        for (let i = 0; i < emaPeriod; i++) sum += candles[i].close;
+        let ema = sum / emaPeriod;
+        emaData.push({ time: candles[emaPeriod - 1].time, value: ema });
+
+        for (let i = emaPeriod; i < candles.length; i++) {
+          ema = candles[i].close * k + ema * (1 - k);
+          emaData.push({ time: candles[i].time, value: ema });
+        }
+        lastEma = ema;
+      }
+
+      if (candles.length > rsiPeriod) {
+        let gainSum = 0;
+        let lossSum = 0;
+
+        for (let i = 1; i <= rsiPeriod; i++) {
+          const diff = candles[i].close - candles[i - 1].close;
+          if (diff > 0) gainSum += diff;
+          else lossSum += Math.abs(diff);
+        }
+
+        avgGain = gainSum / rsiPeriod;
+        avgLoss = lossSum / rsiPeriod;
+
+        const firstRsi = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+        rsiData.push({ time: candles[rsiPeriod].time, value: firstRsi, color: getRsiColor(firstRsi) });
+
+        for (let i = rsiPeriod + 1; i < candles.length; i++) {
+          const diff = candles[i].close - candles[i - 1].close;
+          const gain = diff > 0 ? diff : 0;
+          const loss = diff < 0 ? Math.abs(diff) : 0;
+
+          avgGain = (avgGain * (rsiPeriod - 1) + gain) / rsiPeriod;
+          avgLoss = (avgLoss * (rsiPeriod - 1) + loss) / rsiPeriod;
+
+          const rsi = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+          rsiData.push({ time: candles[i].time, value: rsi, color: getRsiColor(rsi) });
+        }
+      }
+
+      return { emaData, rsiData };
+    }
+
+    function computeLiveIndicators(prevCandles, liveCandle, isClosed, emaPeriod = 20, rsiPeriod = 14) {
+      let nextEmaPoint = null;
+      let nextRsiPoint = null;
+      const prevClosed = prevCandles.length > 0 ? prevCandles[prevCandles.length - 1] : null;
+
+      if (lastEma !== null && prevClosed) {
+        const k = 2 / (emaPeriod + 1);
+        const val = liveCandle.close * k + lastEma * (1 - k);
+        nextEmaPoint = { time: liveCandle.time, value: val };
+        if (isClosed) lastEma = val;
+      }
+
+      if (avgGain !== null && avgLoss !== null && prevClosed && prevCandles.length >= rsiPeriod) {
+        const baseCandle = isClosed
+          ? prevClosed
+          : prevCandles.length >= 2
+          ? prevCandles[prevCandles.length - 2]
+          : prevClosed;
+        const diff = liveCandle.close - baseCandle.close;
+        const gain = diff > 0 ? diff : 0;
+        const loss = diff < 0 ? Math.abs(diff) : 0;
+
+        const g = (avgGain * (rsiPeriod - 1) + gain) / rsiPeriod;
+        const l = (avgLoss * (rsiPeriod - 1) + loss) / rsiPeriod;
+        const rsi = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+
+        nextRsiPoint = { time: liveCandle.time, value: rsi, color: getRsiColor(rsi) };
+        if (isClosed) {
+          avgGain = g;
+          avgLoss = l;
+        }
+      }
+
+      return { nextEmaPoint, nextRsiPoint };
+    }
+
+    function updateLegend(emaVal, rsiVal, volVal) {
+      if (typeof emaVal === "number") emaValEl.textContent = formatPrice(currentSymbol, emaVal);
+      if (typeof rsiVal === "number") rsiValEl.textContent = rsiVal.toFixed(2);
+      if (typeof volVal === "number") volValEl.textContent = volVal.toFixed(1);
+    }
+
+    function scheduleFlush() {
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+
+        if (pendingBar) {
+          const { bar, isClosed } = pendingBar;
+          pendingBar = null;
+
+          candleSeries.update(bar);
+          volumeSeries.update(getVolumeBar(bar));
+
+          const { nextEmaPoint, nextRsiPoint } = computeLiveIndicators(
+            candlesHistory,
+            bar,
+            isClosed,
+            20,
+            14
+          );
+
+          if (nextEmaPoint) emaSeries.update(nextEmaPoint);
+          if (nextRsiPoint) rsiSeries.update(nextRsiPoint);
+          updateLegend(nextEmaPoint?.value, nextRsiPoint?.value, bar.volume);
+          evaluateAlerts(bar, nextEmaPoint?.value, nextRsiPoint?.value);
+
+          if (isClosed) {
+            const lastIdx = candlesHistory.length - 1;
+            if (lastIdx >= 0 && candlesHistory[lastIdx].time === bar.time) {
+              candlesHistory[lastIdx] = bar;
+            } else {
+              candlesHistory.push(bar);
+              if (candlesHistory.length > 1000) candlesHistory.shift();
+            }
+          }
+        }
+
+        if (pendingTickers.size > 0) {
+          pendingTickers.forEach((d, sym) => {
+            const priceEl = document.getElementById(`wp-${sym}`);
+            const changeEl = document.getElementById(`wc-${sym}`);
+            if (!priceEl || !changeEl) return;
+
+            const lastPrice = parseFloat(d.c);
+            const pct = parseFloat(d.P);
+            priceEl.textContent = formatPrice(sym, lastPrice);
+            changeEl.textContent = `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
+            changeEl.className = `watch-change ${pct >= 0 ? "up" : "down"}`;
+          });
+          pendingTickers.clear();
+        }
+      });
+    }
+
+    const klineSocket = new ResilientSocket({
+      name: "kline",
+      buildUrl: () =>
+        `wss://stream.binance.com:9443/ws/${currentSymbol.toLowerCase()}@kline_${currentInterval}`,
+      onStatus: (msg) => {
+        statusText.textContent = `${currentSymbol} • ${currentInterval} (${msg})`;
+      },
+      onMessage: (rawData) => {
+        const msg = JSON.parse(rawData);
+        if (!msg.k) return;
+        const k = msg.k;
+        pendingBar = {
+          isClosed: Boolean(k.x),
+          bar: {
+            time: Math.floor(k.t / 1000),
+            open: parseFloat(k.o),
+            high: parseFloat(k.h),
+            low: parseFloat(k.l),
+            close: parseFloat(k.c),
+            volume: parseFloat(k.v),
+          },
+        };
+        scheduleFlush();
+      },
+    });
+
+    const tickerSocket = new ResilientSocket({
+      name: "ticker",
+      buildUrl: () => {
+        const streams = WATCH_SYMBOLS.map((s) => `${s.toLowerCase()}@ticker`).join("/");
+        return `wss://stream.binance.com:9443/stream?streams=${streams}`;
+      },
+      onMessage: (rawData) => {
+        const payload = JSON.parse(rawData);
+        const d = payload.data;
+        if (!d || !d.s) return;
+        pendingTickers.set(d.s, d);
+        scheduleFlush();
+      },
+    });
+
+    async function loadHistory(symbol, interval, seq) {
+      const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=500`;
+      const res = await fetch(url);
+      const raw = await res.json();
+      if (seq !== marketSwitchSeq) return false;
+
+      candlesHistory = raw.map((d) => ({
+        time: Math.floor(d[0] / 1000),
+        open: parseFloat(d[1]),
+        high: parseFloat(d[2]),
+        low: parseFloat(d[3]),
+        close: parseFloat(d[4]),
+        volume: parseFloat(d[5]),
+      }));
+
+      pendingBar = null;
+      candleSeries.setData(candlesHistory);
+      volumeSeries.setData(candlesHistory.map(getVolumeBar));
+
+      const { emaData, rsiData } = buildIndicators(candlesHistory, 20, 14);
+      emaSeries.setData(emaData);
+      rsiSeries.setData(rsiData);
+
+      const lastCandle = candlesHistory[candlesHistory.length - 1];
+      const lastEmaObj = emaData[emaData.length - 1];
+      const lastRsiObj = rsiData[rsiData.length - 1];
+
+      prevPriceDiffEma =
+        lastCandle && typeof lastEmaObj?.value === "number"
+          ? lastCandle.close - lastEmaObj.value
+          : null;
+      prevRsiZone =
+        typeof lastRsiObj?.value === "number"
+          ? lastRsiObj.value >= 70
+            ? "high"
+            : lastRsiObj.value <= 30
+            ? "low"
+            : "mid"
+          : null;
+
+      updateLegend(lastEmaObj?.value, lastRsiObj?.value, lastCandle?.volume);
+      return true;
+    }
+
+    async function switchMarket(symbol, interval) {
+      const seq = ++marketSwitchSeq;
+      currentSymbol = symbol;
+      currentInterval = interval;
+      setDrawMode(false);
+      highlightActiveWatchItem(symbol);
+      renderLevelsForSymbol(symbol);
+
+      const ok = await loadHistory(symbol, interval, seq);
+      if (!ok || seq !== marketSwitchSeq) return;
+      klineSocket.start();
+    }
+
+    symbolSelect.addEventListener("change", (e) => {
+      switchMarket(e.target.value, currentInterval);
+    });
+
+    intervalButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        intervalButtons.forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        switchMarket(currentSymbol, btn.dataset.interval);
+      });
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        if (!klineSocket.ws || klineSocket.ws.readyState !== WebSocket.OPEN) {
+          klineSocket.start();
+        }
+        if (!tickerSocket.ws || tickerSocket.ws.readyState !== WebSocket.OPEN) {
+          tickerSocket.start();
+        }
+      }
+    });
+
+    function resizeChart() {
+      chart.applyOptions({
+        width: container.clientWidth,
+        height: container.clientHeight,
+      });
+    }
+
+    window.addEventListener("resize", resizeChart);
+
+    resizeChart();
+    initWatchlistUI();
+    renderAlarmLogs();
+    tickerSocket.start();
+    switchMarket(currentSymbol, currentInterval);
+  </script>
+</body>
+</html>
+"""
 
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template_string(HTML_TEMPLATE)
 
 
 @app.route("/health")
