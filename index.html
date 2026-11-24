@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Canlı Grafik • Alarmlar, İzleme Listesi & Yatay Seviyeler</title>
+  <title>Canlı Grafik • EMA, RSI, Hacim, İzleme Listesi & Alarmlar</title>
   <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -202,6 +202,9 @@
       line-height: 1.3;
       color: #e6edf3;
     }
+    .alarm-msg.bull { color: #56d364; }
+    .alarm-msg.bear { color: #ff7b72; }
+    .alarm-msg.neutral { color: #f2cc60; }
     .alarm-time {
       font-size: 10px;
       color: #8b949e;
@@ -342,19 +345,16 @@
     let avgLoss = null;
     let activePriceLines = [];
 
-    // Alarm durum takibi
-    let prevPriceDiffEma = null; // pozitif: fiyat > EMA, negatif: fiyat < EMA
-    let prevRsiZone = null;     // "high" (>=70), "low" (<=30), "mid"
+    let prevPriceDiffEma = null;
+    let prevRsiZone = null;
     const alarmCooldownMap = new Map();
     const alarmLogs = [];
     let audioCtx = null;
 
-    // --- KASMADAN ÇİZİM İÇİN RAF TAMPONU ---
     let pendingBar = null;
     const pendingTickers = new Map();
     let rafId = null;
 
-    // --- SESLİ UYARI (WEB AUDIO API) ---
     function playAlertSound(kind = "neutral") {
       if (!soundEnabled) return;
       try {
@@ -384,9 +384,7 @@
           osc.start(now + idx * 0.14);
           osc.stop(now + idx * 0.14 + 0.14);
         });
-      } catch {
-        // Tarayıcı ses politikası engellerse sessizce geç
-      }
+      } catch {}
     }
 
     function renderAlarmLogs() {
@@ -432,7 +430,6 @@
     function evaluateAlerts(bar, emaVal, rsiVal) {
       if (!alarmsEnabled || !bar) return;
 
-      // 1. EMA(20) Kesişimi
       if (typeof emaVal === "number" && Number.isFinite(emaVal)) {
         const diff = bar.close - emaVal;
         if (prevPriceDiffEma !== null) {
@@ -453,7 +450,6 @@
         prevPriceDiffEma = diff;
       }
 
-      // 2. RSI(14) 70 / 30 Seviyeleri
       if (typeof rsiVal === "number" && Number.isFinite(rsiVal)) {
         const currentZone = rsiVal >= 70 ? "high" : rsiVal <= 30 ? "low" : "mid";
         if (currentZone === "high" && prevRsiZone !== "high") {
@@ -472,7 +468,6 @@
         prevRsiZone = currentZone;
       }
 
-      // 3. Yatay Seviye Temasları
       const map = loadSavedLevelsMap();
       const levels = map[currentSymbol] || [];
       levels.forEach((lvl) => {
@@ -511,7 +506,6 @@
       renderAlarmLogs();
     });
 
-    // --- DAYANIKLI WEBSOCKET YÖNETİCİSİ ---
     class ResilientSocket {
       constructor({ name, buildUrl, onMessage, onStatus }) {
         this.name = name;
@@ -617,7 +611,6 @@
       }
     }
 
-    // --- GRAFİK KURULUMU ---
     const chart = LightweightCharts.createChart(container, {
       layout: {
         background: { color: "#0d1117" },
@@ -698,7 +691,6 @@
       title: "30",
     });
 
-    // --- YARDIMCI FORMAT ---
     function formatPrice(symbol, price) {
       const num = Number(price);
       if (!Number.isFinite(num)) return "-";
@@ -709,7 +701,6 @@
       return num.toFixed(2);
     }
 
-    // --- YATAY SEVİYE YÖNETİMİ ---
     function loadSavedLevelsMap() {
       try {
         return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
@@ -824,7 +815,6 @@
       }
     });
 
-    // --- İZLEME LİSTESİ ---
     function initWatchlistUI() {
       watchlistContainer.innerHTML = WATCH_SYMBOLS.map(
         (sym) => `
@@ -855,7 +845,6 @@
       });
     }
 
-    // --- İNDİKATÖRLER ---
     function getVolumeBar(candle) {
       const isUp = candle.close >= candle.open;
       return {
@@ -967,7 +956,6 @@
       if (typeof volVal === "number") volValEl.textContent = volVal.toFixed(1);
     }
 
-    // --- RAF İLE TOPLU ÇİZİM ---
     function scheduleFlush() {
       if (rafId !== null) return;
       rafId = requestAnimationFrame(() => {
@@ -1021,7 +1009,6 @@
       });
     }
 
-    // --- SOKETLER ---
     const klineSocket = new ResilientSocket({
       name: "kline",
       buildUrl: () =>
@@ -1063,7 +1050,6 @@
       },
     });
 
-    // --- GEÇMİŞ VERİ VE SEMBOL GEÇİŞİ ---
     async function loadHistory(symbol, interval, seq) {
       const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=500`;
       const res = await fetch(url);
@@ -1091,7 +1077,6 @@
       const lastEmaObj = emaData[emaData.length - 1];
       const lastRsiObj = rsiData[rsiData.length - 1];
 
-      // Geçiş sırasında ilk tick'te sahte kesişim tetiklememek için başlangıç durumunu ayarla
       prevPriceDiffEma =
         lastCandle && typeof lastEmaObj?.value === "number"
           ? lastCandle.close - lastEmaObj.value
@@ -1154,7 +1139,6 @@
 
     window.addEventListener("resize", resizeChart);
 
-    // Başlat
     resizeChart();
     initWatchlistUI();
     renderAlarmLogs();
