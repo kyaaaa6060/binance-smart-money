@@ -451,7 +451,7 @@ async def resolve_binance_portfolio_id(session: AsyncSession, leader: dict) -> s
             leader["resolved_id"] = found
             return found
     except Exception as exc:
-        print(f"[BINANCE ID ERR] {leader['name']}: {exc}")
+        print(f"[BINANCE ID ERR] {leader['name']}: {exc}", flush=True)
 
     return candidate
 
@@ -502,7 +502,7 @@ async def fetch_binance_leader_positions(
                 if fetched_ok:
                     break
         except Exception as exc:
-            print(f"[BINANCE ERR] {leader['name']} ({resolved_id}): {exc}")
+            print(f"[BINANCE ERR] {leader['name']} ({resolved_id}): {exc}", flush=True)
 
     return {
         "id": resolved_id,
@@ -535,7 +535,7 @@ async def fetch_okx_leader_positions(
                             parsed.append(p)
                     break
             except Exception as exc:
-                print(f"[OKX ERR] {uid}: {exc}")
+                print(f"[OKX ERR] {uid}: {exc}", flush=True)
 
     return {
         "id": uid,
@@ -689,13 +689,28 @@ async def scanner_loop():
                 ]
                 results = await asyncio.gather(*(bn_tasks + okx_tasks))
 
+                bn_active = sum(
+                    1 for r in results if r["exchange"] == "BINANCE" and r["positions"]
+                )
+                okx_active = sum(
+                    1 for r in results if r["exchange"] == "OKX" and r["positions"]
+                )
+                summary = build_coin_summary(results, min_aum=0.0, exchange_filter="ALL")
+
                 CACHE["last_updated"] = time.strftime("%H:%M:%S")
                 CACHE["binance_count"] = len(BINANCE_WATCHLIST)
                 CACHE["okx_count"] = len(OKX_WATCHLIST)
                 CACHE["scanned_leaders"] = len(results)
                 CACHE["leaders"] = results
+                print(
+                    f"[SCAN DONE] {CACHE['last_updated']} | "
+                    f"BN active: {bn_active}/{len(BINANCE_WATCHLIST)} | "
+                    f"OKX active: {okx_active}/{len(OKX_WATCHLIST)} | "
+                    f"Coins: {len(summary['coins'])}",
+                    flush=True,
+                )
         except Exception as exc:
-            print(f"[SCANNER LOOP ERR]: {exc}")
+            print(f"[SCANNER LOOP ERR]: {exc}", flush=True)
 
         await asyncio.sleep(SCAN_INTERVAL)
 
@@ -712,12 +727,16 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 async def health_check():
+    active_leaders = sum(1 for l in CACHE["leaders"] if l.get("positions"))
+    summary = build_coin_summary(CACHE["leaders"], min_aum=0.0, exchange_filter="ALL")
     return JSONResponse(
         {
             "status": "ok",
             "last_updated": CACHE["last_updated"],
             "binance_unique": CACHE["binance_count"],
             "okx_unique": CACHE["okx_count"],
+            "active_leaders": active_leaders,
+            "coins_count": len(summary["coins"]),
         }
     )
 
