@@ -3,255 +3,394 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Copy-Trade Pozisyon Tarayıcı</title>
+  <title>Ağırlıklı Ortalama — Copy-Trade</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    body { background-color: #0b0f17; color: #e2e8f0; }
+    :root {
+      --bg-outer: #16181d;
+      --bg-modal: #1b1e24;
+      --bg-card: #22262e;
+      --bg-inner: #181b20;
+      --border-subtle: #2c313c;
+      --green-glow: #25b878;
+      --green-bg: rgba(24, 92, 62, 0.36);
+      --green-text: #28d18a;
+      --red-bg: rgba(112, 34, 42, 0.34);
+      --red-text: #f04856;
+      --olive-bg: rgba(96, 88, 34, 0.36);
+      --gold-text: #e8b824;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background-color: var(--bg-outer);
+      color: #e6ebf2;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .modal-shell {
+      width: 100%;
+      max-width: 780px;
+      background-color: var(--bg-modal);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.65);
+      overflow: hidden;
+    }
+
+    .source-card {
+      background-color: var(--bg-card);
+      border: 1.5px solid var(--border-subtle);
+      border-radius: 10px;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.15s ease;
+      cursor: pointer;
+    }
+
+    .source-card:hover {
+      border-color: #3f4654;
+    }
+
+    .source-card.active {
+      border-color: var(--green-glow);
+      box-shadow: 0 0 0 1px rgba(37, 184, 120, 0.45), 0 0 22px rgba(37, 184, 120, 0.22);
+    }
+
+    .metric-strip-long {
+      background: linear-gradient(90deg, rgba(22, 86, 58, 0.44) 0%, rgba(22, 86, 58, 0.24) 100%);
+      border: 1px solid rgba(40, 209, 138, 0.14);
+      border-radius: 10px;
+    }
+
+    .metric-strip-short {
+      background: linear-gradient(90deg, rgba(108, 32, 40, 0.44) 0%, rgba(108, 32, 40, 0.24) 100%);
+      border: 1px solid rgba(240, 72, 86, 0.14);
+      border-radius: 10px;
+    }
+
+    .metric-strip-avg {
+      background: linear-gradient(90deg, rgba(94, 86, 32, 0.44) 0%, rgba(94, 86, 32, 0.24) 100%);
+      border: 1px solid rgba(232, 184, 36, 0.16);
+      border-radius: 10px;
+    }
+
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
   </style>
 </head>
-<body class="min-h-screen antialiased">
-  <div class="max-w-7xl mx-auto px-4 py-6">
-    <!-- Üst Başlık ve Durum -->
-    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-800 pb-5">
-      <div>
-        <h1 class="text-2xl font-bold tracking-tight text-white">Copy-Trade Pozisyon Tarayıcı</h1>
-        <p class="text-sm text-slate-400 mt-1">Binance &amp; OKX lider pozisyonları, Long/Short dağılımı ve ağırlıklı ortalama giriş fiyatları</p>
-      </div>
-      <div class="flex flex-wrap items-center gap-3 text-xs">
-        <span id="status-badge" class="px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-          Son Güncelleme: Bekleniyor...
+<body>
+  <div class="modal-shell">
+    <!-- Üst Başlık -->
+    <div class="flex items-center justify-between px-5 py-4 border-b border-[#282d37]">
+      <div class="flex items-center gap-2.5">
+        <span class="inline-flex items-end gap-[2.5px] h-4 w-4 shrink-0" aria-hidden="true">
+          <span class="w-[3.5px] h-[7px] rounded-[1px] bg-[#28d18a]"></span>
+          <span class="w-[3.5px] h-[14px] rounded-[1px] bg-[#f04856]"></span>
+          <span class="w-[3.5px] h-[11px] rounded-[1px] bg-[#3b82f6]"></span>
         </span>
-        <button id="refresh-btn" class="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition">
-          Şimdi Yenile
+        <h1 class="text-[17px] font-semibold tracking-tight text-white">Ağırlıklı Ortalama</h1>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <span id="meta-info" class="text-[11px] text-[#8d96a5] tabular-nums hidden sm:inline">
+          Yükleniyor...
+        </span>
+        <button
+          id="close-or-refresh-btn"
+          type="button"
+          title="Verileri Yenile"
+          class="w-7 h-7 rounded-md flex items-center justify-center text-[#9aa3b2] hover:text-white hover:bg-white/5 transition text-lg leading-none"
+        >
+          ×
         </button>
       </div>
     </div>
 
-    <!-- Özet Kartlar -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
-      <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4">
-        <div class="text-xs text-slate-400">Taranan Lider</div>
-        <div id="stat-scanned" class="text-2xl font-semibold text-white mt-1">0</div>
-        <div id="stat-breakdown" class="text-xs text-slate-500 mt-1">BN: 0 | OKX: 0</div>
+    <!-- Gövde -->
+    <div class="p-5 sm:p-6">
+      <div class="text-center text-[13px] font-medium text-[#cbd2de] mb-4">
+        Veri Kaynağı Seçin:
       </div>
-      <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4">
-        <div class="text-xs text-slate-400">Aktif Pozisyonlu Lider</div>
-        <div id="stat-visible" class="text-2xl font-semibold text-white mt-1">0</div>
-        <div class="text-xs text-slate-500 mt-1">Açık işlemi bulunan hesap</div>
-      </div>
-      <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4">
-        <div class="text-xs text-slate-400">Takip Edilen Coin</div>
-        <div id="stat-coins" class="text-2xl font-semibold text-white mt-1">0</div>
-        <div class="text-xs text-slate-500 mt-1">Filtreye uyan pariteler</div>
-      </div>
-      <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4">
-        <div class="text-xs text-slate-400">Toplam Notional Hacim</div>
-        <div id="stat-volume" class="text-2xl font-semibold text-white mt-1">$0</div>
-        <div class="text-xs text-slate-500 mt-1">Long + Short toplam büyüklük</div>
-      </div>
-    </div>
 
-    <!-- Filtreler -->
-    <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-4 mt-6 flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between">
-      <div class="flex flex-wrap items-center gap-2">
-        <button data-ex="ALL" class="ex-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white">Tümü</button>
-        <button data-ex="BINANCE" class="ex-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700">Binance</button>
-        <button data-ex="OKX" class="ex-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700">OKX</button>
-      </div>
-      <div class="flex flex-wrap items-center gap-3">
-        <input id="search-input" type="text" placeholder="Coin ara (BTC, ETH, SOL...)"
-          class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
-        <label class="flex items-center gap-2 text-xs text-slate-400">
-          Min AUM:
-          <input id="min-aum-input" type="number" min="0" step="1000" value="0"
-            class="w-28 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500" />
-        </label>
-      </div>
-    </div>
+      <!-- 4 Kaynak / Filtre Kartı -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <button type="button" data-source="ALL" class="source-card active py-4 px-3 flex flex-col items-center justify-center gap-2.5">
+          <svg class="w-6 h-6 text-[#cbd2de]" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7 1a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM3.5 18.5c0-2.5 2.46-4.5 5.5-4.5s5.5 2 5.5 4.5V20h-11v-1.5Zm11.5 1.5v-1.3c0-1.45-.72-2.73-1.82-3.52.72-.12 1.48-.18 2.32-.18 2.48 0 4.5 1.57 4.5 3.5V20h-5Z"/>
+          </svg>
+          <span class="text-[12.5px] font-medium text-[#e2e7f0]">Copy Liderler</span>
+        </button>
 
-    <!-- Coin Tablosu -->
-    <div class="bg-slate-900/80 border border-slate-800 rounded-xl mt-6 overflow-hidden">
-      <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse text-sm">
-          <thead>
-            <tr class="border-b border-slate-800 text-xs uppercase text-slate-400 bg-slate-950/60">
-              <th class="py-3 px-4">Sembol</th>
-              <th class="py-3 px-4">Pozisyon (L / S)</th>
-              <th class="py-3 px-4">Long / Short %</th>
-              <th class="py-3 px-4">Long Hacim</th>
-              <th class="py-3 px-4">Short Hacim</th>
-              <th class="py-3 px-4">Toplam Hacim</th>
-              <th class="py-3 px-4">Ort. Giriş (L / S)</th>
-            </tr>
-          </thead>
-          <tbody id="coins-tbody" class="divide-y divide-slate-800/70">
-            <tr>
-              <td colspan="7" class="py-8 text-center text-slate-500">Veriler yükleniyor...</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+        <button type="button" data-source="BINANCE" class="source-card py-4 px-3 flex flex-col items-center justify-center gap-2.5">
+          <svg class="w-6 h-6 text-[#cbd2de]" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 3 4.5 7.2 12 11.4l7.5-4.2L12 3Zm-8.2 6.2v6.6L10.8 20v-6.6L3.8 9.2Zm16.4 0-7 4.2V20l7-4.2V9.2Z"/>
+          </svg>
+          <span class="text-[12.5px] font-medium text-[#e2e7f0]">Binance</span>
+        </button>
 
-    <!-- Seçili Coin Lider Detayları -->
-    <div id="detail-panel" class="hidden bg-slate-900/90 border border-indigo-500/30 rounded-xl p-5 mt-6">
-      <div class="flex items-center justify-between mb-4">
-        <h2 id="detail-title" class="text-lg font-semibold text-white">Detay</h2>
-        <button id="close-detail-btn" class="text-xs px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300">Kapat</button>
+        <button type="button" data-source="OKX" class="source-card py-4 px-3 flex flex-col items-center justify-center gap-2.5">
+          <svg class="w-6 h-6 text-[#cbd2de]" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM9 9h6v6H9V9Zm-5 5h6v6H4v-6Zm10 0h6v6h-6v-6Z"/>
+          </svg>
+          <span class="text-[12.5px] font-medium text-[#e2e7f0]">OKX</span>
+        </button>
+
+        <button type="button" data-source="WHALE_SIZE" class="source-card py-4 px-3 flex flex-col items-center justify-center gap-2.5">
+          <svg class="w-6 h-6 text-[#cbd2de]" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M4 19h2v-6H4v6Zm4.5 0h2V8h-2v11Zm4.5 0h2v-9h-2v9Zm4.5 0h2V5h-2v14Z"/>
+          </svg>
+          <span class="text-[12.5px] font-medium text-[#e2e7f0]">Büyük Hacim</span>
+        </button>
       </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse text-sm">
-          <thead>
-            <tr class="border-b border-slate-800 text-xs uppercase text-slate-400">
-              <th class="py-2.5 px-3">Lider</th>
-              <th class="py-2.5 px-3">Borsa</th>
-              <th class="py-2.5 px-3">Yön</th>
-              <th class="py-2.5 px-3">Büyüklük</th>
-              <th class="py-2.5 px-3">Giriş Fiyatı</th>
-            </tr>
-          </thead>
-          <tbody id="detail-tbody" class="divide-y divide-slate-800/60"></tbody>
-        </table>
+
+      <!-- İç Ana Kutu -->
+      <div class="bg-[#232730] border border-[#2e3440] rounded-xl p-4 sm:p-5">
+        <!-- Sembol Seçimi -->
+        <div class="flex flex-wrap items-center justify-center gap-2 mb-4">
+          <select
+            id="symbol-select"
+            aria-label="Parite Seç"
+            class="bg-[#1b1e25] border border-[#343b49] rounded-lg px-3.5 py-1.5 text-[15px] font-semibold text-white tracking-wide focus:outline-none focus:border-[#4b5568] tabular-nums"
+          >
+            <option value="">BTCUSDT</option>
+          </select>
+        </div>
+
+        <!-- Güncel / Geçmiş Sekmeleri -->
+        <div class="grid grid-cols-2 bg-[#1a1d24] p-1 rounded-lg border border-[#2d323e] mb-4">
+          <button
+            id="tab-current"
+            type="button"
+            class="py-2 px-3 rounded-md text-[13px] font-semibold flex items-center justify-center gap-2 transition bg-[#eab308] text-[#14161a]"
+          >
+            <span class="inline-flex items-end gap-[2px] h-3.5 w-3.5" aria-hidden="true">
+              <span class="w-[3px] h-[6px] bg-current rounded-[1px]"></span>
+              <span class="w-[3px] h-[12px] bg-current rounded-[1px]"></span>
+              <span class="w-[3px] h-[9px] bg-current rounded-[1px]"></span>
+            </span>
+            <span>Güncel</span>
+          </button>
+
+          <button
+            id="tab-history"
+            type="button"
+            class="py-2 px-3 rounded-md text-[13px] font-medium flex items-center justify-center gap-2 transition text-[#9aa3b2] hover:text-white"
+          >
+            <span class="w-3.5 h-3.5 rounded-full bg-[#9aa3b2] text-[#1a1d24] inline-flex items-center justify-center text-[10px] font-bold">
+              ↺
+            </span>
+            <span>Geçmiş</span>
+          </button>
+        </div>
+
+        <!-- LONG Ort. Giriş Şeridi -->
+        <div class="metric-strip-long px-4 py-3.5 mb-3">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2.5">
+              <span class="w-3 h-3 rounded-full bg-[#25c97e] shrink-0"></span>
+              <span class="text-[14.5px] font-semibold text-[#eef2f7]">LONG Ort. Giriş:</span>
+            </div>
+            <div id="long-avg-val" class="text-[18px] sm:text-[19px] font-bold text-[#28d18a] tabular-nums">
+              $0,00
+            </div>
+          </div>
+          <div id="long-sub-val" class="mt-2 text-[12.5px] text-[#9ca5b4] tabular-nums">
+            (0 işlem, $0.00M size)
+          </div>
+        </div>
+
+        <!-- SHORT Ort. Giriş Şeridi -->
+        <div class="metric-strip-short px-4 py-3.5 mb-3">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2.5">
+              <span class="w-3 h-3 rounded-full bg-[#ef4444] shrink-0"></span>
+              <span class="text-[14.5px] font-semibold text-[#eef2f7]">SHORT Ort. Giriş:</span>
+            </div>
+            <div id="short-avg-val" class="text-[18px] sm:text-[19px] font-bold text-[#f04856] tabular-nums">
+              $0,00
+            </div>
+          </div>
+          <div id="short-sub-val" class="mt-2 text-[12.5px] text-[#9ca5b4] tabular-nums">
+            (0 işlem, $0.00M size)
+          </div>
+        </div>
+
+        <!-- Ortalama Giriş Şeridi -->
+        <div class="metric-strip-avg px-4 py-3.5">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2.5">
+              <span class="w-3 h-3 rounded-full bg-[#d4d8df] shrink-0"></span>
+              <span class="text-[14.5px] font-semibold text-[#eef2f7]">Ortalama Giriş:</span>
+            </div>
+            <div id="total-avg-val" class="text-[18px] sm:text-[19px] font-bold text-[#e8b824] tabular-nums">
+              $0,00
+            </div>
+          </div>
+          <div id="total-sub-val" class="mt-1.5 text-[11.5px] text-[#9ca5b4] tabular-nums hidden">
+            (0 işlem, $0.00M toplam size)
+          </div>
+        </div>
       </div>
     </div>
   </div>
 
   <script>
-    let selectedExchange = "ALL";
-    let latestCoins = [];
-    let activeSymbol = null;
+    let selectedSource = "ALL";
+    let activeTab = "current";
+    let coinsList = [];
+    let selectedSymbol = "";
 
-    function fmtUsd(val) {
-      const n = Number(val || 0);
-      if (Math.abs(n) >= 1_000_000) return "$" + (n / 1_000_000).toFixed(2) + "M";
-      if (Math.abs(n) >= 1_000) return "$" + (n / 1_000).toFixed(1) + "K";
-      return "$" + n.toFixed(0);
+    function formatUSDPrice(num) {
+      const n = Number(num || 0);
+      if (!n || Number.isNaN(n)) return "$0,00";
+      const decimals = n >= 100 ? 2 : n >= 1 ? 4 : 6;
+      return "$" + n.toLocaleString("tr-TR", {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+      });
     }
 
-    function fmtPrice(val) {
-      const n = Number(val || 0);
-      if (!n) return "-";
-      if (n >= 100) return n.toFixed(2);
-      if (n >= 1) return n.toFixed(4);
-      return n.toFixed(6);
+    function formatSizeMillions(vol) {
+      const n = Number(vol || 0);
+      const millions = n / 1_000_000;
+      return "$" + millions.toFixed(2) + "M";
     }
 
-    function renderDetail(coin) {
-      const panel = document.getElementById("detail-panel");
-      const tbody = document.getElementById("detail-tbody");
-      document.getElementById("detail-title").textContent = `${coin.symbol} — Açık Lider Pozisyonları (${coin.traders.length})`;
-      tbody.innerHTML = coin.traders.map(t => `
-        <tr class="hover:bg-slate-800/40">
-          <td class="py-2.5 px-3 font-mono text-xs text-slate-200">${t.name} <span class="text-slate-500">(${t.id})</span></td>
-          <td class="py-2.5 px-3 text-xs">${t.exchange}</td>
-          <td class="py-2.5 px-3">
-            <span class="px-2 py-0.5 rounded text-xs font-semibold ${t.side === "LONG" ? "bg-emerald-500/15 text-emerald-300" : "bg-rose-500/15 text-rose-300"}">
-              ${t.side}
-            </span>
-          </td>
-          <td class="py-2.5 px-3 font-medium text-white">${fmtUsd(t.notional)}</td>
-          <td class="py-2.5 px-3 font-mono text-xs text-slate-300">${fmtPrice(t.entry_price)}</td>
-        </tr>
-      `).join("");
-      panel.classList.remove("hidden");
+    function computeWeightedTotalEntry(coin) {
+      const longVol = Number(coin.long_vol || 0);
+      const shortVol = Number(coin.short_vol || 0);
+      const longAvg = Number(coin.long_avg_entry || 0);
+      const shortAvg = Number(coin.short_avg_entry || 0);
+      const totalVol = longVol + shortVol;
+
+      if (totalVol <= 0) return 0;
+      return (longAvg * longVol + shortAvg * shortVol) / totalVol;
     }
 
-    function renderTable() {
-      const q = document.getElementById("search-input").value.trim().toUpperCase();
-      const tbody = document.getElementById("coins-tbody");
-      const filtered = latestCoins.filter(c => !q || c.symbol.includes(q));
-
-      document.getElementById("stat-coins").textContent = filtered.length;
-      const totalVol = filtered.reduce((acc, c) => acc + Number(c.total_vol || 0), 0);
-      document.getElementById("stat-volume").textContent = fmtUsd(totalVol);
-
-      if (!filtered.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-slate-500">Gösterilecek pozisyon bulunamadı.</td></tr>`;
+    function populateSymbolSelect(coins) {
+      const select = document.getElementById("symbol-select");
+      if (!coins.length) {
+        select.innerHTML = `<option value="">BTCUSDT</option>`;
         return;
       }
 
-      tbody.innerHTML = filtered.map(c => `
-        <tr data-sym="${c.symbol}" class="coin-row cursor-pointer hover:bg-slate-800/50 transition ${activeSymbol === c.symbol ? "bg-indigo-950/40" : ""}">
-          <td class="py-3 px-4 font-bold text-white">${c.symbol}</td>
-          <td class="py-3 px-4">
-            <span class="text-emerald-400 font-medium">${c.long_count}L</span> /
-            <span class="text-rose-400 font-medium">${c.short_count}S</span>
-            <span class="text-slate-500 text-xs">(${c.total})</span>
-          </td>
-          <td class="py-3 px-4 w-44">
-            <div class="flex justify-between text-xs mb-1">
-              <span class="text-emerald-400">${c.long_pct}%</span>
-              <span class="text-rose-400">${c.short_pct}%</span>
-            </div>
-            <div class="w-full h-2 bg-rose-500/40 rounded-full overflow-hidden">
-              <div class="h-full bg-emerald-400" style="width: ${c.long_pct}%"></div>
-            </div>
-          </td>
-          <td class="py-3 px-4 text-emerald-300">${fmtUsd(c.long_vol)}</td>
-          <td class="py-3 px-4 text-rose-300">${fmtUsd(c.short_vol)}</td>
-          <td class="py-3 px-4 font-semibold text-white">${fmtUsd(c.total_vol)}</td>
-          <td class="py-3 px-4 font-mono text-xs text-slate-300">
-            <span class="text-emerald-300">${fmtPrice(c.long_avg_entry)}</span> /
-            <span class="text-rose-300">${fmtPrice(c.short_avg_entry)}</span>
-          </td>
-        </tr>
-      `).join("");
+      if (!selectedSymbol || !coins.some((c) => c.symbol === selectedSymbol)) {
+        const btc = coins.find((c) => c.symbol === "BTCUSDT" || c.symbol === "BTC");
+        selectedSymbol = btc ? btc.symbol : coins[0].symbol;
+      }
 
-      document.querySelectorAll(".coin-row").forEach(row => {
-        row.addEventListener("click", () => {
-          const sym = row.getAttribute("data-sym");
-          activeSymbol = sym;
-          const coin = latestCoins.find(item => item.symbol === sym);
-          if (coin) renderDetail(coin);
-          renderTable();
-        });
-      });
+      select.innerHTML = coins
+        .map((c) => `<option value="${c.symbol}" ${c.symbol === selectedSymbol ? "selected" : ""}>${c.symbol}</option>`)
+        .join("");
     }
 
-    async function loadData() {
-      const minAum = document.getElementById("min-aum-input").value || 0;
-      try {
-        const res = await fetch(`/api/positions?exchange=${encodeURIComponent(selectedExchange)}&min_aum=${encodeURIComponent(minAum)}`);
-        const data = await res.json();
+    function renderCard() {
+      const coin = coinsList.find((c) => c.symbol === selectedSymbol);
+      const longAvgEl = document.getElementById("long-avg-val");
+      const shortAvgEl = document.getElementById("short-avg-val");
+      const totalAvgEl = document.getElementById("total-avg-val");
+      const longSubEl = document.getElementById("long-sub-val");
+      const shortSubEl = document.getElementById("short-sub-val");
+      const totalSubEl = document.getElementById("total-sub-val");
 
-        latestCoins = data.coins || [];
-        document.getElementById("status-badge").textContent = `Son Güncelleme: ${data.last_updated || "Taranıyor..."}`;
-        document.getElementById("stat-scanned").textContent = data.scanned_leaders ?? 0;
-        document.getElementById("stat-breakdown").textContent = `BN: ${data.binance_count ?? 0} | OKX: ${data.okx_count ?? 0}`;
-        document.getElementById("stat-visible").textContent = data.visible_leaders ?? 0;
+      if (!coin) {
+        longAvgEl.textContent = "$0,00";
+        shortAvgEl.textContent = "$0,00";
+        totalAvgEl.textContent = "$0,00";
+        longSubEl.textContent = "(0 işlem, $0.00M size)";
+        shortSubEl.textContent = "(0 işlem, $0.00M size)";
+        return;
+      }
 
-        renderTable();
-        if (activeSymbol) {
-          const updatedCoin = latestCoins.find(c => c.symbol === activeSymbol);
-          if (updatedCoin) renderDetail(updatedCoin);
-        }
-      } catch (err) {
-        document.getElementById("status-badge").textContent = "Bağlantı Hatası";
+      const longCount = Number(coin.long_count || 0);
+      const shortCount = Number(coin.short_count || 0);
+      const longVol = Number(coin.long_vol || 0);
+      const shortVol = Number(coin.short_vol || 0);
+      const longAvg = Number(coin.long_avg_entry || 0);
+      const shortAvg = Number(coin.short_avg_entry || 0);
+      const weightedAvg = computeWeightedTotalEntry(coin);
+
+      longAvgEl.textContent = formatUSDPrice(longAvg);
+      shortAvgEl.textContent = formatUSDPrice(shortAvg);
+      totalAvgEl.textContent = formatUSDPrice(weightedAvg);
+
+      longSubEl.textContent = `(${longCount} işlem, ${formatSizeMillions(longVol)} size)`;
+      shortSubEl.textContent = `(${shortCount} işlem, ${formatSizeMillions(shortVol)} size)`;
+
+      if (activeTab === "history") {
+        totalSubEl.classList.remove("hidden");
+        totalSubEl.textContent = `(${longCount + shortCount} toplam işlem, ${formatSizeMillions(longVol + shortVol)} toplam size • anlık özet)`;
+      } else {
+        totalSubEl.classList.add("hidden");
       }
     }
 
-    document.querySelectorAll(".ex-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
-        selectedExchange = btn.getAttribute("data-ex");
-        document.querySelectorAll(".ex-btn").forEach(b => {
-          b.className = "ex-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700";
-        });
-        btn.className = "ex-btn px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white";
-        loadData();
+    async function fetchPositions() {
+      const exchangeParam = selectedSource === "OKX" ? "OKX" : selectedSource === "BINANCE" ? "BINANCE" : "ALL";
+      try {
+        const res = await fetch(`/api/positions?exchange=${encodeURIComponent(exchangeParam)}`);
+        const data = await res.json();
+
+        let coins = Array.isArray(data.coins) ? data.coins : [];
+        if (selectedSource === "WHALE_SIZE") {
+          coins = [...coins].sort((a, b) => Number(b.total_vol || 0) - Number(a.total_vol || 0));
+        }
+
+        coinsList = coins;
+        populateSymbolSelect(coinsList);
+        renderCard();
+
+        const metaEl = document.getElementById("meta-info");
+        metaEl.textContent = `${data.last_updated || "--:--:--"} · ${data.visible_leaders ?? 0} aktif lider`;
+      } catch (e) {
+        document.getElementById("meta-info").textContent = "Bağlantı hatası";
+      }
+    }
+
+    document.querySelectorAll(".source-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        selectedSource = card.getAttribute("data-source");
+        document.querySelectorAll(".source-card").forEach((c) => c.classList.remove("active"));
+        card.classList.add("active");
+        fetchPositions();
       });
     });
 
-    document.getElementById("refresh-btn").addEventListener("click", loadData);
-    document.getElementById("search-input").addEventListener("input", renderTable);
-    document.getElementById("min-aum-input").addEventListener("change", loadData);
-    document.getElementById("close-detail-btn").addEventListener("click", () => {
-      activeSymbol = null;
-      document.getElementById("detail-panel").classList.add("hidden");
-      renderTable();
+    document.getElementById("symbol-select").addEventListener("change", (e) => {
+      selectedSymbol = e.target.value;
+      renderCard();
     });
 
-    loadData();
-    setInterval(loadData, 15000);
+    const tabCurrent = document.getElementById("tab-current");
+    const tabHistory = document.getElementById("tab-history");
+
+    tabCurrent.addEventListener("click", () => {
+      activeTab = "current";
+      tabCurrent.className = "py-2 px-3 rounded-md text-[13px] font-semibold flex items-center justify-center gap-2 transition bg-[#eab308] text-[#14161a]";
+      tabHistory.className = "py-2 px-3 rounded-md text-[13px] font-medium flex items-center justify-center gap-2 transition text-[#9aa3b2] hover:text-white";
+      renderCard();
+    });
+
+    tabHistory.addEventListener("click", () => {
+      activeTab = "history";
+      tabHistory.className = "py-2 px-3 rounded-md text-[13px] font-semibold flex items-center justify-center gap-2 transition bg-[#eab308] text-[#14161a]";
+      tabCurrent.className = "py-2 px-3 rounded-md text-[13px] font-medium flex items-center justify-center gap-2 transition text-[#9aa3b2] hover:text-white";
+      renderCard();
+    });
+
+    document.getElementById("close-or-refresh-btn").addEventListener("click", fetchPositions);
+
+    fetchPositions();
+    setInterval(fetchPositions, 15000);
   </script>
 </body>
 </html>
