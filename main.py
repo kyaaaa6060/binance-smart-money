@@ -1,46 +1,448 @@
 import asyncio
 import os
+import re
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+from curl_cffi.requests import AsyncSession
 from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, JSONResponse
-from curl_cffi.requests import AsyncSession
 
-DEFAULT_MIN_AUM = float(os.getenv("DEFAULT_MIN_AUM", "50000"))
-SCAN_PAGES = int(os.getenv("SCAN_PAGES", "3"))          # 3 sayfa ~ 60 lider (Render Free RAM dostu)
-SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "90"))    # Saniye cinsinden tarama aralığı
+DEFAULT_MIN_AUM = float(os.getenv("DEFAULT_MIN_AUM", "0"))
+SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "120"))
 MAX_CONCURRENCY = int(os.getenv("MAX_CONCURRENCY", "4"))
+
+BINANCE_RAW_LINKS = [
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-f11904099?l=en&r=LBXLGCLF&uc=app_square_share_link&us=more",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-2e5b520705d2?l=en&r=B2YFHBO6&uc=app_square_share_link&us=more",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-aa47b27b7a24?l=en&r=W0VRB5W3&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-f1e33f5a7ef35?l=en&r=D3CU5ZCA&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-75c835342?l=en&r=BXFBP7KC&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/poorcat?l=en&r=VHU2DSUN&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-90288901e9fd?l=en&r=N62YX4JR&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/daddyofjto?l=en&r=S9PCQGNK&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-731503f0a5b9?l=en&r=BH9VUBT9&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-d48e9bbda29b1?l=en&r=YZ7D92ML&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-0d5f98a93b03?l=en&r=YIFWPH9J&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-0f0afa86dba4?l=en&r=CW6N19XT&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-4f4161992?l=en&r=PNOJ4XR8&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-487243813?l=en&r=ZTCOMOYC&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/zhuaibai?l=en&r=RI14K647&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-d6c907ed4b7e8?l=en&r=YBX6ES0G&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-4cf121271?l=en&r=QJZKD3YM&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-eb08b0791ef00?l=en&r=YYT7LUJ7&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-e5ce582dea41?l=en&r=GLFYZOK7&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-8079dd106c4f?l=en&r=XB4YEC3O&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-be7aa3f355c02?l=en&r=BP98SCPP&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-d1f86189ae7a1?l=en&r=SUHM4L1J&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-19867ce31866?l=en&r=TSIQQGMQ&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-991457747?l=en&r=RVZ2GNXR&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-c22178162?l=en&r=NVSDK3FQ&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/carefree-L?l=en&r=GVBDSDFT&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/TDRh?l=en&r=SCQKEIH6&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-811041579?l=en&r=XJQ83CQ6&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Joker999?l=en&r=Y9YMHIML&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-73624121e3b24?l=en&r=Square-Creator-73624121e3b24&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/imone?l=en&r=CL05MK5E&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-500cfabd1e46f?l=en&r=W8KP8AYS&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-d00d598a2001?l=en&r=AM3ZSKV0&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-5b9377428?l=en&r=A9P4LG58&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-981436500?l=en&r=MGWERBBQ&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/solo-ghost?l=en&r=L6UTXCAC&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-7d02c41a758a?l=en&r=YJUTC07Y&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-c46aea8e0c5a?l=en&r=E34J30UC&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-37403bc2712c4?l=en&r=K68UATKF&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/StefanBayes?l=en&r=XMFJ8LTB&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-4e0884e44c34?l=en&r=IAALX38L&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-0d3a54467a14?l=en&r=ASQEXUJS&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-536c244ec1328?l=en&r=CCCQI4XG&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/aozhou?l=en&r=MNS8OV8K&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-269a7bd77cc64?l=en&r=OBB63Z8V&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-12dee8a98668?l=en&r=QI5ZBS51&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/miesedap?l=en&r=VW60MKDR&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/yonghengyishun?l=en&r=LFY4B4AK&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/gzccc?l=en&r=QLJLAGO9&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-65b555835?l=en&r=VNVQ5ZX8&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-fa80ff4ac1a5?l=en&r=A5QCZ4SY&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-599248483?l=en&r=GBKNY08D&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-ab7166b687b38?l=en&r=EM2ZFBQA&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-b2bd0e16caf7a?l=en&r=ZN5L19ID&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-8fe8dcc4edfc6?l=en&r=X1MVMYYB&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-e61296ffe22f9?l=en&r=JM1XX26Q&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-c52225267?l=en&r=DTYFUNHP&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-1f6975b79365f?l=en&r=LWPLMPE4&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-1eed94bc0ba95?l=en&r=VHFKDPR8&uc=app_square_share_link&us=telegram",
+    "https://app.binance.com/uni-qr/cpro/Square-Creator-911d51d83df1?l=en&r=BZPCMPM5&uc=app_square_share_link&us=telegram",
+]
+
+OKX_RAW_LINKS = [
+    "https://www.okx.com/copy-trading/account/FE701D3CB0AC0E8F?tab=trade",
+    "https://www.okx.com/copy-trading/account/6DE7F61BFFD009F6?tab=trade",
+    "https://www.okx.com/copy-trading/account/8C756A028EDC2FE7?tab=trade",
+    "https://www.okx.com/copy-trading/account/E1E1885A7FC500D3?tab=trade",
+    "https://www.okx.com/copy-trading/account/01B0F9478102163C?tab=trade",
+    "https://www.okx.com/copy-trading/account/D89A246530D24C6E?tab=trade",
+    "https://www.okx.com/copy-trading/account/37D18BE54F98F099?tab=trade",
+    "https://www.okx.com/copy-trading/account/B74FC756C8EE894B?tab=trade",
+    "https://www.okx.com/copy-trading/account/CEB867A1A00B6682?tab=trade",
+    "https://www.okx.com/copy-trading/account/811846999954962957?tab=trade",
+    "https://www.okx.com/copy-trading/account/89CB0185A6F9BB72?tab=trade",
+    "https://www.okx.com/copy-trading/account/3CE34D3FF6F990FC?tab=trade",
+    "https://www.okx.com/copy-trading/account/26E1ADBB02FAACA1?tab=trade",
+    "https://www.okx.com/copy-trading/account/38649778D6442398?tab=trade",
+    "https://www.okx.com/copy-trading/account/C2B269D649346A25?tab=trade",
+    "https://www.okx.com/copy-trading/account/744584888019747661?tab=trade",
+    "https://www.okx.com/copy-trading/account/777901231196176970?tab=trade",
+    "https://www.okx.com/copy-trading/account/792427085649551867?tab=trade",
+    "https://www.okx.com/copy-trading/account/757CC8A7D7FAC010?tab=trade",
+    "https://www.okx.com/copy-trading/account/847700947416724159?tab=trade",
+    "https://www.okx.com/copy-trading/account/D2A8F38CFFF5F992?tab=trade",
+    "https://www.okx.com/copy-trading/account/2D545AFACC03C11E?tab=trade",
+    "https://www.okx.com/copy-trading/account/8F53B7AEDF041739?tab=trade",
+    "https://www.okx.com/copy-trading/account/EDC2CA66E137873B?tab=trade",
+    "https://www.okx.com/copy-trading/account/760386676346038930?tab=trade",
+    "https://www.okx.com/copy-trading/account/882337170764375802?tab=trade",
+    "https://www.okx.com/copy-trading/account/0E59266AC1409761?tab=trade",
+    "https://www.okx.com/copy-trading/account/86432F983B99BA1C?tab=trade",
+    "https://www.okx.com/copy-trading/account/D503A7FA37549816?tab=trade",
+    "https://www.okx.com/copy-trading/account/F61990B585217C24?tab=trade",
+    "https://www.okx.com/copy-trading/account/35E22983F436F55B?tab=trade",
+    "https://www.okx.com/copy-trading/account/F1344E1B7AE2D41F?tab=trade",
+    "https://www.okx.com/copy-trading/account/E3654BF20F6C758D?tab=trade",
+    "https://www.okx.com/copy-trading/account/35F888C7BB441B2B?tab=trade",
+    "https://www.okx.com/copy-trading/account/9C2CB3B2306B28EA?tab=trade",
+    "https://www.okx.com/copy-trading/account/6A30B93C28DD247F?tab=trade",
+    "https://www.okx.com/copy-trading/account/7E27C9B14BB5D378?tab=trade",
+    "https://www.okx.com/copy-trading/account/082EDAFDB8CB171F?tab=trade",
+    "https://www.okx.com/copy-trading/account/37131D5541108735?tab=trade",
+    "https://www.okx.com/copy-trading/account/F10D7F7A4A164AFB?tab=trade",
+    "https://www.okx.com/copy-trading/account/58D7D205FB591484?tab=trade",
+    "https://www.okx.com/copy-trading/account/EA315ECC2A50F8B6?tab=trade",
+    "https://www.okx.com/copy-trading/account/7D34F0975D241797?tab=trade",
+    "https://www.okx.com/copy-trading/account/6DC8B73158E4ED70?tab=trade",
+    "https://www.okx.com/copy-trading/account/C9B1558F671ED132?tab=trade",
+    "https://www.okx.com/copy-trading/account/1761D578C7A15813?tab=trade",
+    "https://www.okx.com/copy-trading/account/D286B322B8A241B7?tab=trade",
+    "https://www.okx.com/copy-trading/account/FA400F0E91664A05?tab=trade",
+    "https://www.okx.com/copy-trading/account/31F3288F9B90B496?tab=trade",
+    "https://www.okx.com/copy-trading/account/952071415C9BAD06?tab=trade",
+    "https://www.okx.com/copy-trading/account/869309567220652934?tab=trade",
+    "https://www.okx.com/copy-trading/account/601D07DAAB0F0C95?tab=trade",
+    "https://www.okx.com/copy-trading/account/94FC2CF4A047C10E?tab=trade",
+    "https://www.okx.com/copy-trading/account/B31CCBB35ADBF9C0?tab=trade",
+    "https://www.okx.com/copy-trading/account/3F6FA12F6D099FEA?tab=trade",
+    "https://www.okx.com/copy-trading/account/3DFF614AE5E0AE92?tab=trade",
+    "https://www.okx.com/copy-trading/account/9C65CB446B25F5CC?tab=trade",
+    "https://www.okx.com/copy-trading/account/7E21239BFA805866?tab=trade",
+    "https://www.okx.com/copy-trading/account/24D8CE79A97FD35D?tab=trade",
+    "https://www.okx.com/copy-trading/account/5CE58253DFAAF5CF?tab=trade",
+    "https://www.okx.com/copy-trading/account/A06A1E6EFE75ECCD?tab=trade",
+    "https://www.okx.com/copy-trading/account/0B839006AFCA7A52?tab=trade",
+    "https://www.okx.com/copy-trading/account/D500A09517C4A154?tab=trade",
+    "https://www.okx.com/copy-trading/account/247FE3434DA88B0D?tab=trade",
+    "https://www.okx.com/copy-trading/account/08E31CADCFDDCFB8?tab=trade",
+    "https://www.okx.com/copy-trading/account/4CB5596A9CF90DEA?tab=trade",
+    "https://www.okx.com/copy-trading/account/9F09D843E575FA68?tab=trade",
+    "https://www.okx.com/copy-trading/account/764043965032509720?tab=trade",
+    "https://www.okx.com/copy-trading/account/E3680BE95285F87E?tab=trade",
+    "https://www.okx.com/copy-trading/account/40A3DB1208A52D7D?tab=trade",
+    "https://www.okx.com/copy-trading/account/53AEED5A8E4EBBB2?tab=trade",
+    "https://www.okx.com/copy-trading/account/822824429641453680?tab=trade",
+    "https://www.okx.com/copy-trading/account/6F2CA760327CA528?tab=trade",
+    "https://www.okx.com/copy-trading/account/74F7C7A53CD18275?tab=trade",
+    "https://www.okx.com/copy-trading/account/26E8167F37D30564?tab=trade",
+    "https://www.okx.com/copy-trading/account/6F262ADB3B44266C?tab=trade",
+    "https://www.okx.com/copy-trading/account/1894AF025DAA521A?tab=trade",
+    "https://www.okx.com/copy-trading/account/A24E06C746B022B4?tab=trade",
+    "https://www.okx.com/copy-trading/account/72AFDC179D66D034?tab=trade",
+    "https://www.okx.com/copy-trading/account/80A2447E1FD16A12?tab=trade",
+    "https://www.okx.com/copy-trading/account/130F1CFE28E7E467?tab=trade",
+    "https://www.okx.com/copy-trading/account/14B24FC1CDA23436?tab=trade",
+    "https://www.okx.com/copy-trading/account/517A2A0B4F4C76D6?tab=trade",
+    "https://www.okx.com/copy-trading/account/96F4C7FA4260C891?tab=trade",
+    "https://www.okx.com/copy-trading/account/9A07C62A15E47307?tab=trade",
+    "https://www.okx.com/copy-trading/account/3EB985F124C18792?tab=trade",
+    "https://www.okx.com/copy-trading/account/A53ABB45DE8437C5?tab=trade",
+    "https://www.okx.com/copy-trading/account/041B49EE3E5F5C00?tab=trade",
+    "https://www.okx.com/copy-trading/account/07AB446028582A4E?tab=trade",
+    "https://www.okx.com/copy-trading/account/318EE7554752576C?tab=trade",
+    "https://www.okx.com/copy-trading/account/91CCB52B97C20FA2?tab=trade",
+    "https://www.okx.com/copy-trading/account/F740246F4C8BDC75?tab=trade",
+    "https://www.okx.com/copy-trading/account/513536981821738399?tab=trade",
+    "https://www.okx.com/copy-trading/account/5251484445FC52D8?tab=trade",
+    "https://www.okx.com/copy-trading/account/F2EDD3086F9A651F?tab=trade",
+    "https://www.okx.com/copy-trading/account/DA2B29551CBB2AE7?tab=trade",
+    "https://www.okx.com/copy-trading/account/BE0DCCC5D9571E5A?tab=trade",
+    "https://www.okx.com/copy-trading/account/5C872B837465159F?tab=trade",
+    "https://www.okx.com/copy-trading/account/C024C3CB1B42E876?tab=trade",
+    "https://www.okx.com/copy-trading/account/1499200359BAE11A?tab=trade",
+    "https://www.okx.com/copy-trading/account/0FD18D81A6980710?tab=trade",
+    "https://www.okx.com/copy-trading/account/70923A619CCB8F2F?tab=trade",
+    "https://www.okx.com/copy-trading/account/C419F165132C0C57?tab=trade",
+    "https://www.okx.com/copy-trading/account/4EA706D951ADCBED?tab=trade",
+    "https://www.okx.com/copy-trading/account/2128BA01363B35A5?tab=trade",
+    "https://www.okx.com/copy-trading/account/05F41A1FD4A0C520?tab=trade",
+    "https://www.okx.com/copy-trading/account/DFC68810E340D687?tab=trade",
+    "https://www.okx.com/copy-trading/account/36A47C886FB953EA?tab=trade",
+    "https://www.okx.com/copy-trading/account/E1936A03E66777C6?tab=trade",
+    "https://www.okx.com/copy-trading/account/A72B4B9C78845C00?tab=trade",
+    "https://www.okx.com/copy-trading/account/0A97BA09396C4DC8?tab=trade",
+    "https://www.okx.com/copy-trading/account/114A1793308A1CEB?tab=trade",
+    "https://www.okx.com/copy-trading/account/643A3247025545B6?tab=trade",
+    "https://www.okx.com/copy-trading/account/8D623C226208DA05?tab=trade",
+    "https://www.okx.com/copy-trading/account/FEA1F20A4558468F?tab=trade",
+]
 
 CACHE = {
     "last_updated": None,
     "scanned_leaders": 0,
-    "min_aum": DEFAULT_MIN_AUM,
+    "binance_count": 0,
+    "okx_count": 0,
     "leaders": [],
 }
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Content-Type": "application/json",
-    "clienttype": "web",
+    "Accept": "application/json, text/plain, */*",
 }
 
 
-def extract_entry_price(pos: dict) -> float:
-    for key in ("entryPrice", "avgEntryPrice", "openPrice"):
-        val = pos.get(key)
-        if val is not None:
+def parse_links(links: list, exchange: str) -> list:
+    seen_keys = set()
+    parsed_items = []
+
+    for raw in links:
+        link = (raw or "").strip()
+        if not link:
+            continue
+
+        u = urlparse(link)
+        qs = parse_qs(u.query)
+        path_parts = [p for p in u.path.split("/") if p]
+
+        if exchange == "OKX" and "account" in path_parts:
+            idx = path_parts.index("account")
+            code = path_parts[idx + 1] if idx + 1 < len(path_parts) else path_parts[-1]
+        else:
+            code = path_parts[-1] if path_parts else link
+
+        ref_code = (
+            qs.get("uniqueCode", [None])[0]
+            or qs.get("portfolioId", [None])[0]
+            or qs.get("r", [None])[0]
+        )
+
+        primary_id = code if exchange == "OKX" else (ref_code or code)
+        dedup_key = f"{exchange}:{primary_id.upper()}"
+
+        if dedup_key in seen_keys:
+            continue
+        seen_keys.add(dedup_key)
+
+        short_label = f"{exchange[:2]}-{primary_id[:8]}"
+        parsed_items.append(
+            {
+                "id": primary_id,
+                "resolved_id": primary_id if (primary_id.isdigit() and len(primary_id) >= 12) else None,
+                "slug": code,
+                "name": short_label,
+                "url": link,
+                "exchange": exchange,
+                "aum": 0.0,
+            }
+        )
+
+    return parsed_items
+
+
+BINANCE_WATCHLIST = parse_links(BINANCE_RAW_LINKS, "BINANCE")
+OKX_WATCHLIST = parse_links(OKX_RAW_LINKS, "OKX")
+
+
+def normalize_symbol(raw_symbol: str) -> str:
+    if not raw_symbol:
+        return ""
+    return (
+        raw_symbol.upper()
+        .replace("-SWAP", "")
+        .replace("-FUTURES", "")
+        .replace("-", "")
+        .replace("/", "")
+    )
+
+
+def extract_number(obj: dict, keys: tuple, default: float = 0.0) -> float:
+    for k in keys:
+        val = obj.get(k)
+        if val is not None and val != "":
             try:
-                price = float(val)
-                if price > 0:
-                    return price
+                num = float(val)
+                if num != 0:
+                    return num
             except (ValueError, TypeError):
                 pass
-    return 0.0
+    return default
 
 
-def build_coin_summary(leaders_data: list, min_aum: float):
+def extract_positions_list(payload: dict) -> list:
+    if not isinstance(payload, dict):
+        return []
+    data = payload.get("data")
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("list", "positions", "rows", "records"):
+            if isinstance(data.get(key), list):
+                return data[key]
+    for key in ("list", "positions"):
+        if isinstance(payload.get(key), list):
+            return payload[key]
+    return []
+
+
+def parse_position_item(pos: dict, exchange: str) -> dict | None:
+    raw_sym = pos.get("symbol") or pos.get("instId") or ""
+    symbol = normalize_symbol(raw_sym)
+    if not symbol:
+        return None
+
+    amt = extract_number(pos, ("positionAmount", "pos", "sz", "size", "holdVol"), 0.0)
+    raw_side = str(
+        pos.get("positionSide") or pos.get("posSide") or pos.get("side") or ""
+    ).upper()
+
+    if raw_side in ("LONG", "BUY"):
+        side = "LONG"
+    elif raw_side in ("SHORT", "SELL"):
+        side = "SHORT"
+    elif raw_side in ("BOTH", "NET", ""):
+        if amt > 0:
+            side = "LONG"
+        elif amt < 0:
+            side = "SHORT"
+        else:
+            return None
+    else:
+        return None
+
+    entry_price = extract_number(
+        pos, ("entryPrice", "avgEntryPrice", "avgPx", "openPrice", "markPx"), 0.0
+    )
+    notional = abs(
+        extract_number(
+            pos, ("notionalValue", "notional", "posValue", "margin", "imr"), 0.0
+        )
+    )
+
+    if notional <= 0 and entry_price > 0 and abs(amt) > 0:
+        notional = abs(amt) * entry_price
+
+    if abs(amt) == 0 and notional <= 0:
+        return None
+
+    return {
+        "exchange": exchange,
+        "symbol": symbol,
+        "side": side,
+        "notional": notional,
+        "entry_price": entry_price,
+        "amount": abs(amt),
+    }
+
+
+async def resolve_binance_portfolio_id(session: AsyncSession, leader: dict) -> str:
+    if leader.get("resolved_id"):
+        return str(leader["resolved_id"])
+
+    candidate = str(leader["id"])
+    if candidate.isdigit() and len(candidate) >= 12:
+        leader["resolved_id"] = candidate
+        return candidate
+
+    try:
+        resp = await session.get(
+            leader["url"], headers=HEADERS, timeout=10, allow_redirects=True
+        )
+        html = resp.text or ""
+        match = re.search(r'"portfolioId"\s*:\s*"?(\d{12,25})"?', html)
+        if match:
+            found = match.group(1)
+            leader["resolved_id"] = found
+            return found
+    except Exception:
+        pass
+
+    return candidate
+
+
+async def fetch_binance_leader_positions(
+    session: AsyncSession, semaphore: asyncio.Semaphore, leader: dict
+) -> dict:
+    parsed = []
+    resolved_id = str(leader["id"])
+    async with semaphore:
+        try:
+            await asyncio.sleep(0.2)
+            resolved_id = await resolve_binance_portfolio_id(session, leader)
+            url = (
+                "https://www.binance.com/bapi/futures/v1/friendly/future/copy-trade/"
+                f"lead-data/positions?portfolioId={resolved_id}"
+            )
+            resp = await session.get(url, headers=HEADERS, timeout=12)
+            raw_list = extract_positions_list(resp.json())
+            for item in raw_list:
+                p = parse_position_item(item, "BINANCE")
+                if p:
+                    parsed.append(p)
+        except Exception as exc:
+            print(f"[BINANCE ERR] {leader['name']}: {exc}")
+
+    return {
+        "id": resolved_id,
+        "name": leader["name"],
+        "exchange": "BINANCE",
+        "aum": float(leader.get("aum", 0.0) or 0.0),
+        "positions": parsed,
+    }
+
+
+async def fetch_okx_leader_positions(
+    session: AsyncSession, semaphore: asyncio.Semaphore, leader: dict
+) -> dict:
+    uid = str(leader["id"])
+    urls = [
+        f"https://www.okx.com/api/v5/copytrading/public-current-subpositions?uniqueCode={uid}&instType=SWAP",
+        f"https://www.okx.com/priapi/v5/ecotrade/public/lead-trader/current-positions?uniqueCode={uid}",
+    ]
+    parsed = []
+    async with semaphore:
+        for url in urls:
+            try:
+                await asyncio.sleep(0.2)
+                resp = await session.get(url, headers=HEADERS, timeout=12)
+                raw_list = extract_positions_list(resp.json())
+                if raw_list:
+                    for item in raw_list:
+                        p = parse_position_item(item, "OKX")
+                        if p:
+                            parsed.append(p)
+                    break
+            except Exception as exc:
+                print(f"[OKX ERR] {uid}: {exc}")
+
+    return {
+        "id": uid,
+        "name": leader["name"],
+        "exchange": "OKX",
+        "aum": float(leader.get("aum", 0.0) or 0.0),
+        "positions": parsed,
+    }
+
+
+def build_coin_summary(leaders_data: list, min_aum: float, exchange_filter: str = "ALL"):
     coin_map = defaultdict(
         lambda: {
             "long_count": 0,
@@ -58,10 +460,14 @@ def build_coin_summary(leaders_data: list, min_aum: float):
 
     filtered_leaders = 0
     visible_leaders = 0
+    ex_upper = exchange_filter.upper()
 
     for leader in leaders_data:
+        if ex_upper != "ALL" and leader["exchange"] != ex_upper:
+            continue
         if leader["aum"] < min_aum:
             continue
+
         filtered_leaders += 1
         positions = leader["positions"]
         if positions:
@@ -69,16 +475,9 @@ def build_coin_summary(leaders_data: list, min_aum: float):
 
         for p in positions:
             sym = p["symbol"]
-            amt = float(p.get("positionAmount", 0))
-            notional = abs(float(p.get("notionalValue", 0)))
-            entry = extract_entry_price(p)
-
-            if notional <= 0 and entry > 0:
-                notional = abs(amt) * entry
-
-            side = p.get("positionSide", "BOTH")
-            if side == "BOTH":
-                side = "LONG" if amt > 0 else "SHORT"
+            side = p["side"]
+            notional = p["notional"]
+            entry = p["entry_price"]
 
             if side == "LONG":
                 coin_map[sym]["long_count"] += 1
@@ -100,11 +499,11 @@ def build_coin_summary(leaders_data: list, min_aum: float):
                 {
                     "id": leader["id"],
                     "name": leader["name"],
+                    "exchange": leader["exchange"],
                     "aum": round(leader["aum"], 2),
                     "side": side,
                     "notional": round(notional, 2),
                     "entry_price": round(entry, 6) if entry > 0 else 0.0,
-                    "amount": abs(amt),
                 }
             )
 
@@ -112,7 +511,6 @@ def build_coin_summary(leaders_data: list, min_aum: float):
     for sym, d in coin_map.items():
         total = d["long_count"] + d["short_count"]
         long_pct = round((d["long_count"] / total) * 100, 1) if total > 0 else 0.0
-
         long_avg_entry = (
             d["long_weighted_entry_sum"] / d["long_entry_vol_sum"]
             if d["long_entry_vol_sum"] > 0
@@ -146,71 +544,14 @@ def build_coin_summary(leaders_data: list, min_aum: float):
     formatted_coins.sort(key=lambda x: x["total"], reverse=True)
     return {
         "last_updated": CACHE["last_updated"],
-        "scanned_leaders": CACHE["scanned_leaders"],
+        "scanned_leaders": len(leaders_data),
+        "binance_count": CACHE["binance_count"],
+        "okx_count": CACHE["okx_count"],
         "filtered_leaders": filtered_leaders,
         "visible_leaders": visible_leaders,
         "min_aum": min_aum,
+        "exchange": ex_upper,
         "coins": formatted_coins,
-    }
-
-
-async def fetch_leaders(session: AsyncSession, pages: int = SCAN_PAGES):
-    url = "https://www.binance.com/bapi/futures/v1/friendly/future/copy-trade/home-page/query-list"
-    leaders_by_id = {}
-
-    for page in range(1, pages + 1):
-        payload = {
-            "pageNumber": page,
-            "pageSize": 20,
-            "timeRange": "30D",
-            "dataType": "PNL",
-            "favoriteOnly": False,
-            "hideFull": False,
-            "nickname": "",
-            "order": "DESC",
-        }
-        try:
-            resp = await session.post(url, json=payload, headers=HEADERS, timeout=12)
-            data = resp.json()
-            if data.get("success") and data.get("data", {}).get("list"):
-                for item in data["data"]["list"]:
-                    pid = item["leadPortfolioId"]
-                    aum = float(item.get("aumAmount", 0) or 0)
-                    leaders_by_id[pid] = {
-                        "id": pid,
-                        "name": item.get("nickname", "Unknown"),
-                        "aum": aum,
-                    }
-        except Exception:
-            pass
-        await asyncio.sleep(0.25)
-
-    return list(leaders_by_id.values())
-
-
-async def fetch_positions(session: AsyncSession, semaphore: asyncio.Semaphore, leader: dict):
-    url = (
-        "https://www.binance.com/bapi/futures/v1/friendly/future/copy-trade/"
-        f"lead-data/positions?portfolioId={leader['id']}"
-    )
-    positions = []
-    async with semaphore:
-        try:
-            await asyncio.sleep(0.2)
-            resp = await session.get(url, headers=HEADERS, timeout=12)
-            data = resp.json()
-            if data.get("success") and data.get("data"):
-                positions = [
-                    p for p in data["data"] if float(p.get("positionAmount", 0)) != 0
-                ]
-        except Exception:
-            pass
-
-    return {
-        "id": leader["id"],
-        "name": leader["name"],
-        "aum": leader["aum"],
-        "positions": positions,
     }
 
 
@@ -219,15 +560,23 @@ async def scanner_loop():
     while True:
         try:
             async with AsyncSession(impersonate="chrome120") as session:
-                leaders = await fetch_leaders(session, pages=SCAN_PAGES)
-                tasks = [fetch_positions(session, semaphore, leader) for leader in leaders]
-                detailed_leaders = await asyncio.gather(*tasks)
+                bn_tasks = [
+                    fetch_binance_leader_positions(session, semaphore, l)
+                    for l in BINANCE_WATCHLIST
+                ]
+                okx_tasks = [
+                    fetch_okx_leader_positions(session, semaphore, l)
+                    for l in OKX_WATCHLIST
+                ]
+                results = await asyncio.gather(*(bn_tasks + okx_tasks))
 
                 CACHE["last_updated"] = time.strftime("%H:%M:%S")
-                CACHE["scanned_leaders"] = len(detailed_leaders)
-                CACHE["leaders"] = detailed_leaders
-        except Exception:
-            pass
+                CACHE["binance_count"] = len(BINANCE_WATCHLIST)
+                CACHE["okx_count"] = len(OKX_WATCHLIST)
+                CACHE["scanned_leaders"] = len(results)
+                CACHE["leaders"] = results
+        except Exception as exc:
+            print(f"[SCANNER LOOP ERR]: {exc}")
 
         await asyncio.sleep(SCAN_INTERVAL)
 
@@ -244,15 +593,26 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 async def health_check():
-    return JSONResponse({"status": "ok", "last_updated": CACHE["last_updated"]})
+    return JSONResponse(
+        {
+            "status": "ok",
+            "last_updated": CACHE["last_updated"],
+            "binance_unique": CACHE["binance_count"],
+            "okx_unique": CACHE["okx_count"],
+        }
+    )
 
 
 @app.get("/")
 async def serve_ui():
-    html_path = Path("static/index.html")
-    return FileResponse(html_path)
+    return FileResponse(Path("static/index.html"))
 
 
 @app.get("/api/positions")
-async def get_positions(min_aum: float = Query(default=DEFAULT_MIN_AUM, ge=0)):
-    return build_coin_summary(CACHE["leaders"], min_aum=min_aum)
+async def get_positions(
+    min_aum: float = Query(default=DEFAULT_MIN_AUM, ge=0),
+    exchange: str = Query(default="ALL"),
+):
+    return build_coin_summary(
+        CACHE["leaders"], min_aum=min_aum, exchange_filter=exchange
+    )
