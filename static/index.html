@@ -161,7 +161,7 @@
             aria-label="Parite Seç"
             class="bg-[#1b1e25] border border-[#343b49] rounded-lg px-3.5 py-1.5 text-[15px] font-semibold text-white tracking-wide focus:outline-none focus:border-[#4b5568] tabular-nums"
           >
-            <option value="">BTCUSDT</option>
+            <option value="">Veri bekleniyor...</option>
           </select>
         </div>
 
@@ -200,11 +200,11 @@
               <span class="text-[14.5px] font-semibold text-[#eef2f7]">LONG Ort. Giriş:</span>
             </div>
             <div id="long-avg-val" class="text-[18px] sm:text-[19px] font-bold text-[#28d18a] tabular-nums">
-              $0,00
+              —
             </div>
           </div>
           <div id="long-sub-val" class="mt-2 text-[12.5px] text-[#9ca5b4] tabular-nums">
-            (0 işlem, $0.00M size)
+            Açık pozisyon bekleniyor
           </div>
         </div>
 
@@ -216,11 +216,11 @@
               <span class="text-[14.5px] font-semibold text-[#eef2f7]">SHORT Ort. Giriş:</span>
             </div>
             <div id="short-avg-val" class="text-[18px] sm:text-[19px] font-bold text-[#f04856] tabular-nums">
-              $0,00
+              —
             </div>
           </div>
           <div id="short-sub-val" class="mt-2 text-[12.5px] text-[#9ca5b4] tabular-nums">
-            (0 işlem, $0.00M size)
+            Açık pozisyon bekleniyor
           </div>
         </div>
 
@@ -232,12 +232,10 @@
               <span class="text-[14.5px] font-semibold text-[#eef2f7]">Ortalama Giriş:</span>
             </div>
             <div id="total-avg-val" class="text-[18px] sm:text-[19px] font-bold text-[#e8b824] tabular-nums">
-              $0,00
+              —
             </div>
           </div>
-          <div id="total-sub-val" class="mt-1.5 text-[11.5px] text-[#9ca5b4] tabular-nums hidden">
-            (0 işlem, $0.00M toplam size)
-          </div>
+          <div id="total-sub-val" class="mt-1.5 text-[11.5px] text-[#9ca5b4] tabular-nums hidden"></div>
         </div>
       </div>
     </div>
@@ -251,7 +249,7 @@
 
     function formatUSDPrice(num) {
       const n = Number(num || 0);
-      if (!n || Number.isNaN(n)) return "$0,00";
+      if (!n || Number.isNaN(n)) return "—";
       const decimals = n >= 100 ? 2 : n >= 1 ? 4 : 6;
       return "$" + n.toLocaleString("tr-TR", {
         minimumFractionDigits: decimals,
@@ -282,7 +280,8 @@
     function populateSymbolSelect(coins) {
       const select = document.getElementById("symbol-select");
       if (!coins.length) {
-        select.innerHTML = `<option value="">BTCUSDT</option>`;
+        selectedSymbol = "";
+        select.innerHTML = `<option value="">Açık pozisyon bulunamadı</option>`;
         return;
       }
 
@@ -306,11 +305,12 @@
       const totalSubEl = document.getElementById("total-sub-val");
 
       if (!coin) {
-        longAvgEl.textContent = "$0,00";
-        shortAvgEl.textContent = "$0,00";
-        totalAvgEl.textContent = "$0,00";
-        longSubEl.textContent = "(0 işlem, $0.00M size)";
-        shortSubEl.textContent = "(0 işlem, $0.00M size)";
+        longAvgEl.textContent = "—";
+        shortAvgEl.textContent = "—";
+        totalAvgEl.textContent = "—";
+        longSubEl.textContent = "Seçili filtrede açık işlem yok";
+        shortSubEl.textContent = "Seçili filtrede açık işlem yok";
+        totalSubEl.classList.add("hidden");
         return;
       }
 
@@ -353,7 +353,7 @@
         renderCard();
 
         const metaEl = document.getElementById("meta-info");
-        metaEl.textContent = `${data.last_updated || "--:--:--"} · ${data.visible_leaders ?? 0} aktif lider`;
+        metaEl.textContent = `${data.last_updated || "Taranıyor..."} · ${data.visible_leaders ?? 0} aktif lider · ${coinsList.length} coin`;
       } catch (e) {
         document.getElementById("meta-info").textContent = "Bağlantı hatası";
       }
