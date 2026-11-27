@@ -369,6 +369,8 @@ def parse_position_item(pos: dict, exchange: str) -> dict | None:
             "avgCostPrice",
             "avgPx",
             "openPrice",
+            "markPx",
+            "markPrice",
         ),
         0.0,
     )
@@ -380,23 +382,17 @@ def parse_position_item(pos: dict, exchange: str) -> dict | None:
                 "notional",
                 "posValue",
                 "positionValue",
+                "margin",
+                "imr",
             ),
             0.0,
         )
     )
 
-    abs_amt = abs(amt)
+    if notional <= 0 and entry_price > 0 and abs(amt) > 0:
+        notional = abs(amt) * entry_price
 
-    if notional <= 0 and entry_price > 0 and abs_amt > 0:
-        notional = abs_amt * entry_price
-
-    if abs_amt <= 0 and notional > 0 and entry_price > 0:
-        abs_amt = notional / entry_price
-
-    if entry_price <= 0 and notional > 0 and abs_amt > 0:
-        entry_price = notional / abs_amt
-
-    if abs_amt <= 0 and notional <= 0:
+    if abs(amt) == 0 and notional <= 0:
         return None
 
     return {
@@ -405,7 +401,7 @@ def parse_position_item(pos: dict, exchange: str) -> dict | None:
         "side": side,
         "notional": notional,
         "entry_price": entry_price,
-        "amount": abs_amt,
+        "amount": abs(amt),
     }
 
 
@@ -436,6 +432,7 @@ async def resolve_binance_portfolio_id(session: AsyncSession, leader: dict) -> s
             if m:
                 found = m.group(1)
                 leader["resolved_id"] = found
+                print(f"[BINANCE ID OK] {leader['name']} -> {found}")
                 return found
 
         final_url = str(resp.url)
@@ -443,15 +440,19 @@ async def resolve_binance_portfolio_id(session: AsyncSession, leader: dict) -> s
         q_pid = (qs_final.get("portfolioId") or qs_final.get("r") or [None])[0]
         if q_pid and q_pid.isdigit() and len(q_pid) >= 12:
             leader["resolved_id"] = q_pid
+            print(f"[BINANCE ID QUERY] {leader['name']} -> {q_pid}")
             return q_pid
 
         m_url = re.search(r"(\d{12,25})", final_url)
         if m_url:
             found = m_url.group(1)
             leader["resolved_id"] = found
+            print(f"[BINANCE ID URL] {leader['name']} -> {found}")
             return found
+
+        print(f"[BINANCE ID MISS] {leader['name']} status={resp.status_code} url={final_url[:90]}")
     except Exception as exc:
-        print(f"[BINANCE ID ERR] {leader['name']}: {exc}", flush=True)
+        print(f"[BINANCE ID ERR] {leader['name']}: {exc}")
 
     return candidate
 
@@ -501,8 +502,11 @@ async def fetch_binance_leader_positions(
                         break
                 if fetched_ok:
                     break
+
+            if not fetched_ok:
+                print(f"[BINANCE EMPTY] {leader['name']} tried={candidates}")
         except Exception as exc:
-            print(f"[BINANCE ERR] {leader['name']} ({resolved_id}): {exc}", flush=True)
+            print(f"[BINANCE ERR] {leader['name']} ({resolved_id}): {exc}")
 
     return {
         "id": resolved_id,
@@ -535,7 +539,7 @@ async def fetch_okx_leader_positions(
                             parsed.append(p)
                     break
             except Exception as exc:
-                print(f"[OKX ERR] {uid}: {exc}", flush=True)
+                print(f"[OKX ERR] {uid}: {exc}")
 
     return {
         "id": uid,
@@ -555,11 +559,9 @@ def build_coin_summary(leaders_data: list, min_aum: float, exchange_filter: str 
             "short_vol": 0.0,
             "total_vol": 0.0,
             "long_weighted_entry_sum": 0.0,
-            "long_qty_sum": 0.0,
+            "long_entry_vol_sum": 0.0,
             "short_weighted_entry_sum": 0.0,
-            "short_qty_sum": 0.0,
-            "all_weighted_entry_sum": 0.0,
-            "all_qty_sum": 0.0,
+            "short_entry_vol_sum": 0.0,
             "traders": [],
         }
     )
@@ -584,24 +586,19 @@ def build_coin_summary(leaders_data: list, min_aum: float, exchange_filter: str 
             side = p["side"]
             notional = p["notional"]
             entry = p["entry_price"]
-            qty = p["amount"]
-
-            if entry > 0 and qty > 0:
-                coin_map[sym]["all_weighted_entry_sum"] += entry * qty
-                coin_map[sym]["all_qty_sum"] += qty
 
             if side == "LONG":
                 coin_map[sym]["long_count"] += 1
                 coin_map[sym]["long_vol"] += notional
-                if entry > 0 and qty > 0:
-                    coin_map[sym]["long_weighted_entry_sum"] += entry * qty
-                    coin_map[sym]["long_qty_sum"] += qty
+                if entry > 0 and notional > 0:
+                    coin_map[sym]["long_weighted_entry_sum"] += entry * notional
+                    coin_map[sym]["long_entry_vol_sum"] += notional
             elif side == "SHORT":
                 coin_map[sym]["short_count"] += 1
                 coin_map[sym]["short_vol"] += notional
-                if entry > 0 and qty > 0:
-                    coin_map[sym]["short_weighted_entry_sum"] += entry * qty
-                    coin_map[sym]["short_qty_sum"] += qty
+                if entry > 0 and notional > 0:
+                    coin_map[sym]["short_weighted_entry_sum"] += entry * notional
+                    coin_map[sym]["short_entry_vol_sum"] += notional
             else:
                 continue
 
@@ -615,7 +612,6 @@ def build_coin_summary(leaders_data: list, min_aum: float, exchange_filter: str 
                     "side": side,
                     "notional": round(notional, 2),
                     "entry_price": round(entry, 6) if entry > 0 else 0.0,
-                    "amount": round(qty, 6) if qty > 0 else 0.0,
                 }
             )
 
@@ -623,20 +619,14 @@ def build_coin_summary(leaders_data: list, min_aum: float, exchange_filter: str 
     for sym, d in coin_map.items():
         total = d["long_count"] + d["short_count"]
         long_pct = round((d["long_count"] / total) * 100, 1) if total > 0 else 0.0
-
         long_avg_entry = (
-            d["long_weighted_entry_sum"] / d["long_qty_sum"]
-            if d["long_qty_sum"] > 0
+            d["long_weighted_entry_sum"] / d["long_entry_vol_sum"]
+            if d["long_entry_vol_sum"] > 0
             else 0.0
         )
         short_avg_entry = (
-            d["short_weighted_entry_sum"] / d["short_qty_sum"]
-            if d["short_qty_sum"] > 0
-            else 0.0
-        )
-        avg_entry = (
-            d["all_weighted_entry_sum"] / d["all_qty_sum"]
-            if d["all_qty_sum"] > 0
+            d["short_weighted_entry_sum"] / d["short_entry_vol_sum"]
+            if d["short_entry_vol_sum"] > 0
             else 0.0
         )
 
@@ -653,7 +643,6 @@ def build_coin_summary(leaders_data: list, min_aum: float, exchange_filter: str 
                 "total_vol": round(d["total_vol"], 2),
                 "long_avg_entry": round(long_avg_entry, 6),
                 "short_avg_entry": round(short_avg_entry, 6),
-                "avg_entry": round(avg_entry, 6),
                 "long_pct": long_pct,
                 "short_pct": round(100 - long_pct, 1),
                 "traders": sorted_traders,
@@ -695,7 +684,6 @@ async def scanner_loop():
                 okx_active = sum(
                     1 for r in results if r["exchange"] == "OKX" and r["positions"]
                 )
-                summary = build_coin_summary(results, min_aum=0.0, exchange_filter="ALL")
 
                 CACHE["last_updated"] = time.strftime("%H:%M:%S")
                 CACHE["binance_count"] = len(BINANCE_WATCHLIST)
@@ -705,12 +693,10 @@ async def scanner_loop():
                 print(
                     f"[SCAN DONE] {CACHE['last_updated']} | "
                     f"BN active: {bn_active}/{len(BINANCE_WATCHLIST)} | "
-                    f"OKX active: {okx_active}/{len(OKX_WATCHLIST)} | "
-                    f"Coins: {len(summary['coins'])}",
-                    flush=True,
+                    f"OKX active: {okx_active}/{len(OKX_WATCHLIST)}"
                 )
         except Exception as exc:
-            print(f"[SCANNER LOOP ERR]: {exc}", flush=True)
+            print(f"[SCANNER LOOP ERR]: {exc}")
 
         await asyncio.sleep(SCAN_INTERVAL)
 
@@ -727,16 +713,12 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 async def health_check():
-    active_leaders = sum(1 for l in CACHE["leaders"] if l.get("positions"))
-    summary = build_coin_summary(CACHE["leaders"], min_aum=0.0, exchange_filter="ALL")
     return JSONResponse(
         {
             "status": "ok",
             "last_updated": CACHE["last_updated"],
             "binance_unique": CACHE["binance_count"],
             "okx_unique": CACHE["okx_count"],
-            "active_leaders": active_leaders,
-            "coins_count": len(summary["coins"]),
         }
     )
 
