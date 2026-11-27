@@ -204,9 +204,9 @@ CACHE = {
     "leaders": [],
 }
 
-HEADERS = {
-    "Content-Type": "application/json",
+API_HEADERS = {
     "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.binance.com/",
 }
 
 
@@ -243,10 +243,16 @@ def parse_links(links: list, exchange: str) -> list:
         seen_keys.add(dedup_key)
 
         short_label = f"{exchange[:2]}-{primary_id[:8]}"
+        resolved_init = (
+            primary_id
+            if (primary_id.isdigit() and len(primary_id) >= 12)
+            else (code if code.isdigit() and len(code) >= 12 else None)
+        )
+
         parsed_items.append(
             {
                 "id": primary_id,
-                "resolved_id": primary_id if (primary_id.isdigit() and len(primary_id) >= 12) else None,
+                "resolved_id": resolved_init,
                 "slug": code,
                 "name": short_label,
                 "url": link,
@@ -294,24 +300,51 @@ def extract_positions_list(payload: dict) -> list:
     if isinstance(data, list):
         return data
     if isinstance(data, dict):
-        for key in ("list", "positions", "rows", "records"):
+        for key in ("list", "positions", "rows", "records", "items"):
             if isinstance(data.get(key), list):
                 return data[key]
-    for key in ("list", "positions"):
+    for key in ("list", "positions", "rows", "records"):
         if isinstance(payload.get(key), list):
             return payload[key]
     return []
 
 
 def parse_position_item(pos: dict, exchange: str) -> dict | None:
-    raw_sym = pos.get("symbol") or pos.get("instId") or ""
+    if not isinstance(pos, dict):
+        return None
+
+    raw_sym = (
+        pos.get("symbol")
+        or pos.get("instId")
+        or pos.get("pair")
+        or pos.get("contractCode")
+        or ""
+    )
     symbol = normalize_symbol(raw_sym)
     if not symbol:
         return None
 
-    amt = extract_number(pos, ("positionAmount", "pos", "sz", "size", "holdVol"), 0.0)
+    amt = extract_number(
+        pos,
+        (
+            "positionAmount",
+            "posAmt",
+            "pos",
+            "sz",
+            "size",
+            "holdVol",
+            "volume",
+            "qty",
+            "quantity",
+        ),
+        0.0,
+    )
     raw_side = str(
-        pos.get("positionSide") or pos.get("posSide") or pos.get("side") or ""
+        pos.get("positionSide")
+        or pos.get("posSide")
+        or pos.get("side")
+        or pos.get("direction")
+        or ""
     ).upper()
 
     if raw_side in ("LONG", "BUY"):
@@ -329,11 +362,30 @@ def parse_position_item(pos: dict, exchange: str) -> dict | None:
         return None
 
     entry_price = extract_number(
-        pos, ("entryPrice", "avgEntryPrice", "avgPx", "openPrice", "markPx"), 0.0
+        pos,
+        (
+            "entryPrice",
+            "avgEntryPrice",
+            "avgCostPrice",
+            "avgPx",
+            "openPrice",
+            "markPx",
+            "markPrice",
+        ),
+        0.0,
     )
     notional = abs(
         extract_number(
-            pos, ("notionalValue", "notional", "posValue", "margin", "imr"), 0.0
+            pos,
+            (
+                "notionalValue",
+                "notional",
+                "posValue",
+                "positionValue",
+                "margin",
+                "imr",
+            ),
+            0.0,
         )
     )
 
@@ -357,23 +409,50 @@ async def resolve_binance_portfolio_id(session: AsyncSession, leader: dict) -> s
     if leader.get("resolved_id"):
         return str(leader["resolved_id"])
 
-    candidate = str(leader["id"])
+    candidate = str(leader["id"]).strip()
     if candidate.isdigit() and len(candidate) >= 12:
         leader["resolved_id"] = candidate
         return candidate
 
     try:
         resp = await session.get(
-            leader["url"], headers=HEADERS, timeout=10, allow_redirects=True
+            leader["url"],
+            headers={"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
+            timeout=12,
+            allow_redirects=True,
         )
         html = resp.text or ""
-        match = re.search(r'"portfolioId"\s*:\s*"?(\d{12,25})"?', html)
-        if match:
-            found = match.group(1)
+        patterns = [
+            r'"portfolioId"\s*:\s*"?(\d{12,25})"?',
+            r"portfolioId[\"'=\s:]+(\d{12,25})",
+            r"portfolio-detail/(\d{12,25})",
+        ]
+        for pat in patterns:
+            m = re.search(pat, html)
+            if m:
+                found = m.group(1)
+                leader["resolved_id"] = found
+                print(f"[BINANCE ID OK] {leader['name']} -> {found}")
+                return found
+
+        final_url = str(resp.url)
+        qs_final = parse_qs(urlparse(final_url).query)
+        q_pid = (qs_final.get("portfolioId") or qs_final.get("r") or [None])[0]
+        if q_pid and q_pid.isdigit() and len(q_pid) >= 12:
+            leader["resolved_id"] = q_pid
+            print(f"[BINANCE ID QUERY] {leader['name']} -> {q_pid}")
+            return q_pid
+
+        m_url = re.search(r"(\d{12,25})", final_url)
+        if m_url:
+            found = m_url.group(1)
             leader["resolved_id"] = found
+            print(f"[BINANCE ID URL] {leader['name']} -> {found}")
             return found
-    except Exception:
-        pass
+
+        print(f"[BINANCE ID MISS] {leader['name']} status={resp.status_code} url={final_url[:90]}")
+    except Exception as exc:
+        print(f"[BINANCE ID ERR] {leader['name']}: {exc}")
 
     return candidate
 
@@ -385,20 +464,49 @@ async def fetch_binance_leader_positions(
     resolved_id = str(leader["id"])
     async with semaphore:
         try:
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.25)
             resolved_id = await resolve_binance_portfolio_id(session, leader)
-            url = (
-                "https://www.binance.com/bapi/futures/v1/friendly/future/copy-trade/"
-                f"lead-data/positions?portfolioId={resolved_id}"
-            )
-            resp = await session.get(url, headers=HEADERS, timeout=12)
-            raw_list = extract_positions_list(resp.json())
-            for item in raw_list:
-                p = parse_position_item(item, "BINANCE")
-                if p:
-                    parsed.append(p)
+
+            candidates = [resolved_id]
+            if leader.get("id") and str(leader["id"]) != resolved_id:
+                candidates.append(str(leader["id"]))
+            if leader.get("slug") and str(leader["slug"]) not in candidates:
+                candidates.append(str(leader["slug"]))
+
+            fetched_ok = False
+            for pid_try in candidates:
+                urls = [
+                    "https://www.binance.com/bapi/futures/v1/friendly/future/copy-trade/"
+                    f"lead-data/positions?portfolioId={pid_try}",
+                    "https://www.binance.com/bapi/futures/v1/public/future/copy-trade/"
+                    f"lead-data/positions?portfolioId={pid_try}",
+                ]
+                for url in urls:
+                    resp = await session.get(url, headers=API_HEADERS, timeout=12)
+                    if resp.status_code != 200:
+                        continue
+                    try:
+                        payload = resp.json()
+                    except Exception:
+                        continue
+
+                    raw_list = extract_positions_list(payload)
+                    if raw_list:
+                        resolved_id = pid_try
+                        leader["resolved_id"] = pid_try
+                        for item in raw_list:
+                            p = parse_position_item(item, "BINANCE")
+                            if p:
+                                parsed.append(p)
+                        fetched_ok = True
+                        break
+                if fetched_ok:
+                    break
+
+            if not fetched_ok:
+                print(f"[BINANCE EMPTY] {leader['name']} tried={candidates}")
         except Exception as exc:
-            print(f"[BINANCE ERR] {leader['name']}: {exc}")
+            print(f"[BINANCE ERR] {leader['name']} ({resolved_id}): {exc}")
 
     return {
         "id": resolved_id,
@@ -422,7 +530,7 @@ async def fetch_okx_leader_positions(
         for url in urls:
             try:
                 await asyncio.sleep(0.2)
-                resp = await session.get(url, headers=HEADERS, timeout=12)
+                resp = await session.get(url, headers=API_HEADERS, timeout=12)
                 raw_list = extract_positions_list(resp.json())
                 if raw_list:
                     for item in raw_list:
@@ -570,11 +678,23 @@ async def scanner_loop():
                 ]
                 results = await asyncio.gather(*(bn_tasks + okx_tasks))
 
+                bn_active = sum(
+                    1 for r in results if r["exchange"] == "BINANCE" and r["positions"]
+                )
+                okx_active = sum(
+                    1 for r in results if r["exchange"] == "OKX" and r["positions"]
+                )
+
                 CACHE["last_updated"] = time.strftime("%H:%M:%S")
                 CACHE["binance_count"] = len(BINANCE_WATCHLIST)
                 CACHE["okx_count"] = len(OKX_WATCHLIST)
                 CACHE["scanned_leaders"] = len(results)
                 CACHE["leaders"] = results
+                print(
+                    f"[SCAN DONE] {CACHE['last_updated']} | "
+                    f"BN active: {bn_active}/{len(BINANCE_WATCHLIST)} | "
+                    f"OKX active: {okx_active}/{len(OKX_WATCHLIST)}"
+                )
         except Exception as exc:
             print(f"[SCANNER LOOP ERR]: {exc}")
 
