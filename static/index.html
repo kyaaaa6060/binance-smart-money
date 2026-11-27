@@ -265,7 +265,10 @@
       return "$" + millions.toFixed(2) + "M";
     }
 
-    function computeWeightedTotalEntry(coin) {
+    function computeOverallAvgEntry(coin) {
+      if (Number(coin.avg_entry || 0) > 0) {
+        return Number(coin.avg_entry);
+      }
       const longVol = Number(coin.long_vol || 0);
       const shortVol = Number(coin.short_vol || 0);
       const longAvg = Number(coin.long_avg_entry || 0);
@@ -317,11 +320,11 @@
       const shortVol = Number(coin.short_vol || 0);
       const longAvg = Number(coin.long_avg_entry || 0);
       const shortAvg = Number(coin.short_avg_entry || 0);
-      const weightedAvg = computeWeightedTotalEntry(coin);
+      const overallAvg = computeOverallAvgEntry(coin);
 
       longAvgEl.textContent = formatUSDPrice(longAvg);
       shortAvgEl.textContent = formatUSDPrice(shortAvg);
-      totalAvgEl.textContent = formatUSDPrice(weightedAvg);
+      totalAvgEl.textContent = formatUSDPrice(overallAvg);
 
       longSubEl.textContent = `(${longCount} işlem, ${formatSizeMillions(longVol)} size)`;
       shortSubEl.textContent = `(${shortCount} işlem, ${formatSizeMillions(shortVol)} size)`;
